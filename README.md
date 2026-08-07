@@ -41,17 +41,17 @@ context instead of pulling in every PDF a user has ever uploaded.
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 14 (App Router), TypeScript |
-| Styling | Tailwind CSS + shadcn/ui (Radix primitives) |
-| Auth | Clerk (`@clerk/nextjs`) |
-| LLM | Groq — `llama-3.1-8b-instant` (`@langchain/groq`) |
-| Embeddings | Google Gemini — `gemini-embedding-001`, 3072 dimensions (`@langchain/google-genai`) |
-| Vector store | Supabase Postgres + `pgvector`, accessed via `@supabase/supabase-js` |
-| Rate limiting | Upstash Redis + `@upstash/ratelimit` |
-| PDF parsing | `pdf-parse` |
-| Monorepo tooling | npm workspaces + Turborepo |
+| Layer            | Technology                                                                          |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| Framework        | Next.js 14 (App Router), TypeScript                                                 |
+| Styling          | Tailwind CSS + shadcn/ui (Radix primitives)                                         |
+| Auth             | Clerk (`@clerk/nextjs`)                                                             |
+| LLM              | Groq — `llama-3.1-8b-instant` (`@langchain/groq`)                                   |
+| Embeddings       | Google Gemini — `gemini-embedding-001`, 3072 dimensions (`@langchain/google-genai`) |
+| Vector store     | Supabase Postgres + `pgvector`, accessed via `@supabase/supabase-js`                |
+| Rate limiting    | Upstash Redis + `@upstash/ratelimit`                                                |
+| PDF parsing      | `pdf-parse`                                                                         |
+| Monorepo tooling | npm workspaces + Turborepo                                                          |
 
 ## Project Structure
 
@@ -82,6 +82,7 @@ supabase/
 ## Prerequisites
 
 You'll need accounts/keys for:
+
 - A [Supabase](https://supabase.com) project with the `pgvector` extension enabled
 - A [Clerk](https://dashboard.clerk.com) application
 - A [Groq](https://console.groq.com) API key
@@ -98,6 +99,7 @@ npm install
 
 Apply the database schema — run the SQL files in `supabase/migrations/` against
 your Supabase project, in order, via the Supabase SQL editor or CLI:
+
 ```
 supabase/migrations/001_add_user_id_and_rls.sql
 supabase/migrations/002_add_thread_id.sql
@@ -107,9 +109,11 @@ Copy `frontend/.env.example` to `frontend/.env` and fill in real values (see
 [Environment Variables](#environment-variables) below).
 
 Run it:
+
 ```bash
 npm run dev --workspace=frontend
 ```
+
 The app is served at `http://localhost:3000`.
 
 ## Environment Variables
@@ -117,24 +121,25 @@ The app is served at `http://localhost:3000`.
 All variables live in `frontend/.env`. See `frontend/.env.example` for the
 authoritative list of names.
 
-| Variable | Where it's used |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Browser-side Supabase client |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser-side Supabase client (anon/public key) |
-| `SUPABASE_URL` | Server-side (API routes) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side only — full DB access, bypasses RLS. Never expose to the browser. |
-| `GROQ_API_KEY` | Chat completion (`llama-3.1-8b-instant`) |
-| `GOOGLE_API_KEY` | Embeddings (`gemini-embedding-001`) — must come from aistudio.google.com |
-| `UPSTASH_REDIS_REST_URL` | Rate limiting |
-| `UPSTASH_REDIS_REST_TOKEN` | Rate limiting |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk client SDK |
-| `CLERK_SECRET_KEY` | Clerk server SDK — server-side only |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `_SIGN_UP_URL` | Clerk route config (`/sign-in`, `/sign-up`) |
-| `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` / `_AFTER_SIGN_UP_URL` | Clerk redirect targets (`/`) |
+| Variable                                                     | Where it's used                                                               |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`                                   | Browser-side Supabase client                                                  |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`                              | Browser-side Supabase client (anon/public key)                                |
+| `SUPABASE_URL`                                               | Server-side (API routes)                                                      |
+| `SUPABASE_SERVICE_ROLE_KEY`                                  | Server-side only — full DB access, bypasses RLS. Never expose to the browser. |
+| `GROQ_API_KEY`                                               | Chat completion (`llama-3.1-8b-instant`)                                      |
+| `GOOGLE_API_KEY`                                             | Embeddings (`gemini-embedding-001`) — must come from aistudio.google.com      |
+| `UPSTASH_REDIS_REST_URL`                                     | Rate limiting                                                                 |
+| `UPSTASH_REDIS_REST_TOKEN`                                   | Rate limiting                                                                 |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`                          | Clerk client SDK                                                              |
+| `CLERK_SECRET_KEY`                                           | Clerk server SDK — server-side only                                           |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `_SIGN_UP_URL`             | Clerk route config (`/sign-in`, `/sign-up`)                                   |
+| `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` / `_AFTER_SIGN_UP_URL` | Clerk redirect targets (`/`)                                                  |
 
 ## Database Schema
 
 `documents` — PDF chunks with embeddings, scoped by user and thread:
+
 ```sql
 create table documents (
   id uuid primary key default gen_random_uuid(),
@@ -147,6 +152,7 @@ create table documents (
 ```
 
 `chat_history` — persisted conversation turns, scoped by user and session:
+
 ```sql
 create table chat_history (
   id uuid primary key default gen_random_uuid(),

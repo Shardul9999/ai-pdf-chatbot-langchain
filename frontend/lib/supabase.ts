@@ -17,7 +17,9 @@ export type ChatHistoryRow = {
 /**
  * Load all messages for a given session from Supabase, oldest first.
  */
-export async function loadChatHistory(sessionId: string): Promise<ChatHistoryRow[]> {
+export async function loadChatHistory(
+  sessionId: string,
+): Promise<ChatHistoryRow[]> {
   const { data, error } = await supabase
     .from('chat_history')
     .select('*')

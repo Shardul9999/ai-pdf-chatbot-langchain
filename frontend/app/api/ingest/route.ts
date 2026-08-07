@@ -84,7 +84,10 @@ export async function POST(request: NextRequest) {
     );
     if (invalidFiles.length > 0) {
       return NextResponse.json(
-        { error: 'Only PDF files are allowed and file size must be less than 10 MB' },
+        {
+          error:
+            'Only PDF files are allowed and file size must be less than 10 MB',
+        },
         { status: 400 },
       );
     }
@@ -99,14 +102,19 @@ export async function POST(request: NextRequest) {
         pdfParseMs += Date.now() - t0pdf; // PERF - remove before production
         rawDocs.push(...docs);
       } catch (err: any) {
-        console.error(`[ingest] Error parsing ${file.name}:`, err?.message ?? err);
+        console.error(
+          `[ingest] Error parsing ${file.name}:`,
+          err?.message ?? err,
+        );
         // Skip bad files; continue with the rest
       }
     }
 
     if (rawDocs.length === 0) {
       return NextResponse.json(
-        { error: 'No valid content could be extracted from the uploaded files' },
+        {
+          error: 'No valid content could be extracted from the uploaded files',
+        },
         { status: 422 },
       );
     }
@@ -135,7 +143,10 @@ export async function POST(request: NextRequest) {
     const t0embed = Date.now();
     const vectors = await embeddings.embedDocuments(texts);
     const embedMs = Date.now() - t0embed; // PERF - remove before production
-    const chunksPerSec = embedMs > 0 ? Math.round((validChunks.length / (embedMs / 1000)) * 10) / 10 : 0; // PERF - remove before production
+    const chunksPerSec =
+      embedMs > 0
+        ? Math.round((validChunks.length / (embedMs / 1000)) * 10) / 10
+        : 0; // PERF - remove before production
 
     // Also guard against API returning empty vectors for any chunk
     const safeChunks = validChunks.filter((_, i) => vectors[i]?.length > 0);
@@ -162,11 +173,16 @@ export async function POST(request: NextRequest) {
     const BATCH_SIZE = 50;
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE);
-      const { error: insertError } = await supabase.from('documents').insert(batch);
+      const { error: insertError } = await supabase
+        .from('documents')
+        .insert(batch);
       if (insertError) {
         console.error('[ingest] Supabase insert error:', insertError.message);
         return NextResponse.json(
-          { error: 'Failed to store document embeddings', details: insertError.message },
+          {
+            error: 'Failed to store document embeddings',
+            details: insertError.message,
+          },
           { status: 500 },
         );
       }

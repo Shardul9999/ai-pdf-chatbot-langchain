@@ -4,7 +4,7 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ['main']
   pull_request:
   workflow_dispatch: # Allows triggering the workflow manually in GitHub UI
 
@@ -24,11 +24,11 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: 18.x
-          cache: "yarn"
+          cache: 'npm'
       - name: Install dependencies
-        run: yarn install --immutable --mode=skip-build
+        run: npm ci
       - name: Check formatting
-        run: yarn format:check
+        run: npm run format:check
 
   lint:
     name: Check linting
@@ -39,8 +39,8 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: 18.x
-          cache: "yarn"
+          cache: 'npm'
       - name: Install dependencies
-        run: yarn install --immutable --mode=skip-build
+        run: npm ci
       - name: Check linting
-        run: yarn run lint:all
+        run: npm run lint

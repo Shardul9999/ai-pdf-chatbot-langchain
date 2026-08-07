@@ -9,11 +9,13 @@ This is a full-stack AI PDF chatbot. A user uploads PDF files, the system chunks
 ## Tech Stack
 
 ### Monorepo
+
 - **Package manager**: npm workspaces + Turborepo
 - **Root**: `e:\ai-pdf-chatbot-langchain\`
 - **Workspaces**: `frontend/`, `backend/`
 
 ### Frontend (`frontend/`)
+
 - **Framework**: Next.js 14 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS + shadcn/ui components
@@ -23,6 +25,7 @@ This is a full-stack AI PDF chatbot. A user uploads PDF files, the system chunks
 - **PDF parsing**: `pdf-parse` (in Next.js API route)
 
 ### Backend (`backend/`)
+
 - **Runtime**: Node.js (ESM, TypeScript compiled with `tsc`)
 - **Framework**: LangGraph (`@langchain/langgraph`) dev server via `node run_backend.js`
 - **LLM**: Groq (`groq/llama-3.1-8b-instant`) via `@langchain/groq`
@@ -43,6 +46,7 @@ npm run dev --workspace=frontend
 ```
 
 Build backend after any TypeScript changes:
+
 ```bash
 npm run build --workspace=backend
 ```
@@ -52,6 +56,7 @@ npm run build --workspace=backend
 ## Environment Variables
 
 ### `backend/.env`
+
 ```env
 OPENAI_API_KEY=           # Not actively used — kept for legacy
 GROQ_API_KEY=gsk_...      # LLM for chat (llama-3.1-8b-instant)
@@ -61,6 +66,7 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...  # service_role secret key (NOT anon key)
 ```
 
 ### `frontend/.env`
+
 ```env
 NEXT_PUBLIC_LANGGRAPH_API_URL=http://127.0.0.1:2024
 LANGCHAIN_API_KEY=local
@@ -77,6 +83,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...  # anon/public key (NOT service_role)
 ## Supabase Database Schema
 
 ### `documents` table — PDF vector chunks
+
 ```sql
 create table documents (
   id uuid primary key default gen_random_uuid(),
@@ -105,6 +112,7 @@ $$;
 ```
 
 ### `chat_history` table — Persistent conversation storage
+
 ```sql
 create table chat_history (
   id uuid primary key default gen_random_uuid(),
@@ -125,6 +133,7 @@ create index chat_history_session_id_idx on chat_history(session_id);
 ## Architecture & Data Flow
 
 ### PDF Upload Flow
+
 ```
 User selects PDF in browser
   → POST /api/ingest (Next.js API route, frontend/app/api/ingest/route.ts)
@@ -137,6 +146,7 @@ User selects PDF in browser
 ```
 
 ### Chat Flow
+
 ```
 User types message
   → page.tsx calls POST /api/chat (frontend/app/api/chat/route.ts)
@@ -149,12 +159,13 @@ User types message
 ```
 
 ### Session / Chat History Flow
+
 ```
 Page loads
   → Check localStorage for 'chatSessionId' and 'chatThreadId'
   → If found: load messages from Supabase chat_history, restore thread
   → If not found: create new LangGraph thread, save IDs to localStorage
-  
+
 On page refresh: messages are restored from Supabase ✅
 After backend restart: messages visible in UI but AI starts fresh (LangGraph thread in RAM is wiped) ⚠️
 ```
@@ -164,24 +175,26 @@ After backend restart: messages visible in UI but AI starts fresh (LangGraph thr
 ## Key Source Files
 
 ### Backend
-| File | Purpose |
-|------|---------|
-| `backend/src/ingestion_graph/graph.ts` | LangGraph graph: PDF ingestion node. Has debug `console.log` statements (should be removed for production) |
-| `backend/src/retrieval_graph/graph.ts` | LangGraph graph: Router → retrieval → LLM response |
-| `backend/src/retrieval_graph/prompts.ts` | System prompts for router (biased toward 'retrieve') and response generation |
-| `backend/src/shared/retrieval.ts` | `makeRetriever()` — switches between Supabase and in-memory based on env vars |
-| `backend/src/shared/configuration.ts` | `ensureBaseConfiguration()` — auto-falls back to 'memory' if Supabase keys are missing |
-| `backend/run_backend.js` | Loads `.env` manually, spawns LangGraph dev server |
+
+| File                                     | Purpose                                                                                                    |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `backend/src/ingestion_graph/graph.ts`   | LangGraph graph: PDF ingestion node. Has debug `console.log` statements (should be removed for production) |
+| `backend/src/retrieval_graph/graph.ts`   | LangGraph graph: Router → retrieval → LLM response                                                         |
+| `backend/src/retrieval_graph/prompts.ts` | System prompts for router (biased toward 'retrieve') and response generation                               |
+| `backend/src/shared/retrieval.ts`        | `makeRetriever()` — switches between Supabase and in-memory based on env vars                              |
+| `backend/src/shared/configuration.ts`    | `ensureBaseConfiguration()` — auto-falls back to 'memory' if Supabase keys are missing                     |
+| `backend/run_backend.js`                 | Loads `.env` manually, spawns LangGraph dev server                                                         |
 
 ### Frontend
-| File | Purpose |
-|------|---------|
-| `frontend/app/page.tsx` | Main chat UI — all chat state, session management, Supabase persistence |
-| `frontend/app/api/ingest/route.ts` | Next.js API route: receives PDF, parses it, sends to LangGraph ingestion_graph |
-| `frontend/app/api/chat/route.ts` | Next.js API route: proxies SSE stream from LangGraph retrieval_graph |
-| `frontend/lib/supabase.ts` | Supabase client + `loadChatHistory()` + `saveChatMessage()` helpers |
-| `frontend/lib/langgraph-client.ts` | LangGraph SDK client pointing to localhost:2024 |
-| `frontend/constants/graphConfigs.ts` | Chat config: model=`groq/llama-3.1-8b-instant`, retriever=`supabase`, k=5 |
+
+| File                                 | Purpose                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------ |
+| `frontend/app/page.tsx`              | Main chat UI — all chat state, session management, Supabase persistence        |
+| `frontend/app/api/ingest/route.ts`   | Next.js API route: receives PDF, parses it, sends to LangGraph ingestion_graph |
+| `frontend/app/api/chat/route.ts`     | Next.js API route: proxies SSE stream from LangGraph retrieval_graph           |
+| `frontend/lib/supabase.ts`           | Supabase client + `loadChatHistory()` + `saveChatMessage()` helpers            |
+| `frontend/lib/langgraph-client.ts`   | LangGraph SDK client pointing to localhost:2024                                |
+| `frontend/constants/graphConfigs.ts` | Chat config: model=`groq/llama-3.1-8b-instant`, retriever=`supabase`, k=5      |
 
 ---
 
@@ -204,6 +217,7 @@ After backend restart: messages visible in UI but AI starts fresh (LangGraph thr
 ### 🔴 Critical for Deployment
 
 1. **Backend deployment** — `npm run langgraph:dev` is DEV ONLY. For production, choose one of:
+
    - **Option A**: Deploy to LangGraph Cloud (paid, managed)
    - **Option B**: Refactor backend logic into Next.js API routes (removes separate backend entirely, deploy everything to Vercel)
    - **Option C**: Self-host on a VPS with Docker
@@ -236,21 +250,25 @@ After backend restart: messages visible in UI but AI starts fresh (LangGraph thr
 ## Known Gotchas & Lessons Learned
 
 ### Google Embedding Models
+
 - The model names changed: `text-embedding-004` and `embedding-001` no longer exist in the API
 - **Current correct model**: `gemini-embedding-001` (3072 dimensions, NOT 768)
 - API keys must come from **aistudio.google.com** (keys starting with `AIzaSy...`)
 - Keys from Google Cloud Console with `AQ.` prefix do NOT work with this API
 
 ### Supabase Vector Dimensions
+
 - Old schemas used `vector(768)` or `vector(1536)` — these are WRONG for `gemini-embedding-001`
 - **Current schema must use `vector(3072)`** — changing dimensions requires dropping and recreating the table
 
 ### LangGraph Backend Config
+
 - `retrieverProvider` defaults to `'supabase'` but auto-falls back to `'memory'` if `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` env vars are empty
 - The backend uses `service_role` key (full DB access), the frontend uses `anon` key (limited access)
 - Backend must be built (`npm run build --workspace=backend`) after any TypeScript changes before running
 
 ### Chat Session Design
+
 - `session_id` and `thread_id` are the same value (LangGraph's `thread.thread_id`)
 - Both stored in `localStorage` under keys `'chatSessionId'` and `'chatThreadId'`
 - `loadChatHistory()` queries Supabase by `session_id`
@@ -259,6 +277,7 @@ After backend restart: messages visible in UI but AI starts fresh (LangGraph thr
 ---
 
 ## Security Issues to Fix Before Deployment
+
 - `Supabase passoword.txt` file was added to `.gitignore` — verify it's not committed to git
 - `backend/test_embeddings.mjs` contains API key loading logic — delete before deployment
 - RLS disabled on all Supabase tables

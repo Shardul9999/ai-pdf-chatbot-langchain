@@ -70,18 +70,26 @@ export async function POST(req: Request) {
   const activeSessionId = sessionId ?? threadId;
 
   if (!activeSessionId) {
-    return new NextResponse(JSON.stringify({ error: 'sessionId or threadId is required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new NextResponse(
+      JSON.stringify({ error: 'sessionId or threadId is required' }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   // --- Env check ---
   if (!process.env.GROQ_API_KEY) {
-    return new NextResponse(JSON.stringify({ error: 'Server misconfiguration: GROQ_API_KEY missing' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new NextResponse(
+      JSON.stringify({
+        error: 'Server misconfiguration: GROQ_API_KEY missing',
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   const encoder = new TextEncoder();
@@ -116,7 +124,10 @@ export async function POST(req: Request) {
         });
 
         // --- 2. Load chat history from Supabase ---
-        let historyMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+        let historyMessages: Array<{
+          role: 'user' | 'assistant';
+          content: string;
+        }> = [];
         if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
           try {
             const supabase = createClient(
@@ -131,20 +142,32 @@ export async function POST(req: Request) {
               .order('created_at', { ascending: true })
               .limit(20);
             if (data) {
-              historyMessages = data as Array<{ role: 'user' | 'assistant'; content: string }>;
+              historyMessages = data as Array<{
+                role: 'user' | 'assistant';
+                content: string;
+              }>;
             }
           } catch (err: any) {
-            console.error('[chat] Chat history load error:', err?.message ?? err);
+            console.error(
+              '[chat] Chat history load error:',
+              err?.message ?? err,
+            );
           }
         }
 
         // --- 3. Build context string from retrieved docs ---
-        const context = retrievedDocs.length > 0
-          ? retrievedDocs.map((d, i) => `[Document ${i + 1}]\n${d.pageContent}`).join('\n\n---\n\n')
-          : 'No relevant documents found.';
+        const context =
+          retrievedDocs.length > 0
+            ? retrievedDocs
+                .map((d, i) => `[Document ${i + 1}]\n${d.pageContent}`)
+                .join('\n\n---\n\n')
+            : 'No relevant documents found.';
 
         // --- 4. Build messages for Groq ---
-        const chatMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+        const chatMessages: Array<{
+          role: 'system' | 'user' | 'assistant';
+          content: string;
+        }> = [
           {
             role: 'system',
             content: `${SYSTEM_PROMPT}\n\nRelevant context from uploaded documents:\n\n${context}`,
@@ -167,7 +190,10 @@ export async function POST(req: Request) {
         const t0stream = Date.now();
 
         const groqStream = await groq.stream(
-          chatMessages.map((m) => ({ role: m.role, content: m.content })) as any,
+          chatMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })) as any,
         );
 
         for await (const chunk of groqStream) {
@@ -180,9 +206,7 @@ export async function POST(req: Request) {
             }
             fullContent += delta;
             // Emit streaming partial event in the format page.tsx expects
-            enqueue('messages/partial', [
-              { type: 'ai', content: fullContent },
-            ]);
+            enqueue('messages/partial', [{ type: 'ai', content: fullContent }]);
           }
         }
 
@@ -199,7 +223,11 @@ export async function POST(req: Request) {
         });
 
         // --- 6. Persist messages to Supabase after stream completes ---
-        if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && fullContent) {
+        if (
+          process.env.SUPABASE_URL &&
+          process.env.SUPABASE_SERVICE_ROLE_KEY &&
+          fullContent
+        ) {
           try {
             const supabase = createClient(
               process.env.SUPABASE_URL,
@@ -218,14 +246,21 @@ export async function POST(req: Request) {
                 session_id: activeSessionId,
                 role: 'assistant',
                 content: fullContent,
-                sources: retrievedDocs.length > 0
-                  ? retrievedDocs.map((d) => ({ pageContent: d.pageContent, metadata: d.metadata }))
-                  : null,
+                sources:
+                  retrievedDocs.length > 0
+                    ? retrievedDocs.map((d) => ({
+                        pageContent: d.pageContent,
+                        metadata: d.metadata,
+                      }))
+                    : null,
               },
             ]);
           } catch (err: any) {
             // Non-fatal: UI already shows the response; just log the failure
-            console.error('[chat] Failed to persist chat history:', err?.message ?? err);
+            console.error(
+              '[chat] Failed to persist chat history:',
+              err?.message ?? err,
+            );
           }
         }
       } catch (err: any) {

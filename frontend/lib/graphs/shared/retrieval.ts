@@ -110,7 +110,12 @@ export class SupabaseUserRetriever extends BaseRetriever {
     });
 
     return (data ?? []).map(
-      (row: { content: string; metadata: Record<string, any>; id: string; similarity: number }) =>
+      (row: {
+        content: string;
+        metadata: Record<string, any>;
+        id: string;
+        similarity: number;
+      }) =>
         new Document({
           pageContent: row.content,
           metadata: { ...row.metadata, id: row.id, similarity: row.similarity },
@@ -136,5 +141,10 @@ export async function makeRetriever(
     return new SimpleMemoryRetriever();
   }
 
-  return new SupabaseUserRetriever(supabaseUrl, serviceRoleKey, userId, threadId);
+  return new SupabaseUserRetriever(
+    supabaseUrl,
+    serviceRoleKey,
+    userId,
+    threadId,
+  );
 }

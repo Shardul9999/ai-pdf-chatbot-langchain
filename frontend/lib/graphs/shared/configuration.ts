@@ -24,7 +24,9 @@ export function ensureBaseConfiguration(
   const requestedProvider = overrides.retrieverProvider ?? 'supabase';
 
   const retrieverProvider: RetrieverProvider =
-    requestedProvider === 'supabase' && !hasSupabaseKeys ? 'memory' : requestedProvider;
+    requestedProvider === 'supabase' && !hasSupabaseKeys
+      ? 'memory'
+      : requestedProvider;
 
   return {
     retrieverProvider,

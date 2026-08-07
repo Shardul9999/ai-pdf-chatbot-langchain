@@ -1,9 +1,9 @@
-import { FileIcon, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { FileIcon, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface FilePreviewProps {
-  file: File
-  onRemove: () => void
+  file: File;
+  onRemove: () => void;
 }
 
 export function FilePreview({ file, onRemove }: FilePreviewProps) {
@@ -13,7 +13,9 @@ export function FilePreview({ file, onRemove }: FilePreviewProps) {
         <FileIcon className="w-6 h-6 text-white" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate text-gray-700">{file.name}</p>
+        <p className="text-sm font-medium truncate text-gray-700">
+          {file.name}
+        </p>
         <p className="text-xs text-gray-500">PDF</p>
       </div>
       <Button
@@ -25,6 +27,5 @@ export function FilePreview({ file, onRemove }: FilePreviewProps) {
         <X className="h-4 w-4" />
       </Button>
     </div>
-  )
+  );
 }
-

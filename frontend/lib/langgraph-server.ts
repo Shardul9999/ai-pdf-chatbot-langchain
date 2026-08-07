@@ -24,7 +24,9 @@ export const createServerClient = () => {
   if (process.env.LANGCHAIN_API_KEY) {
     headers['X-Api-Key'] = process.env.LANGCHAIN_API_KEY;
   } else {
-    console.warn('Warning: LANGCHAIN_API_KEY is not set. Local dev server mode.');
+    console.warn(
+      'Warning: LANGCHAIN_API_KEY is not set. Local dev server mode.',
+    );
   }
 
   const client = new Client({

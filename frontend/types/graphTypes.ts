@@ -4,11 +4,7 @@ import { Document } from '@langchain/core/documents';
  * Represents the state of the retrieval graph / agent.
  */
 export type documentType =
-  | PDFDocument[]
-  | { [key: string]: any }[]
-  | string[]
-  | string
-  | 'delete';
+  PDFDocument[] | { [key: string]: any }[] | string[] | string | 'delete';
 export interface AgentState {
   query?: string;
   route?: string;

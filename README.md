@@ -224,3 +224,198 @@ Originally derived from the [Learning LangChain (O'Reilly)](https://www.oreilly.
 ## Architecture
 
 The standalone LangGraph server (`backend/`, port 2024) has been retired and consolidated directly into Next.js API Routes (`frontend/app/api/*`).
+
+```
+                              ┌──────────────────────────┐
+                              │  Browser (app/page.tsx)  │
+                              └────────────┬─────────────┘
+                                           │
+           ┌───────────────────────────────┼───────────────────────────────┐
+           │                               │                               │
+           ▼                               ▼                               ▼
+POST /api/ingest               POST /api/chat                  GET /api/history
+ ├─ Parse PDF (`pdf-parse`)     ├─ Embed Query (Gemini)         └─ Fetch prior messages
+ ├─ Chunk & Embed (Gemini)      ├─ Similarity Match (pgvector)     filtered by `user_id`
+ └─ Store in Supabase           ├─ Stream Answer (Groq)            and `session_id`
+    `documents` table           └─ Persist to `chat_history`
+```
+
+### API Reference
+
+| Endpoint | Method | Description | Auth Required |
+| :--- | :--- | :--- | :--- |
+| `/api/ingest` | `POST` | Accepts multipart PDF data, chunks, embeds, and stores vectors. | Yes |
+| `/api/chat` | `POST` | Accepts user prompt, performs vector similarity search, streams LLM output. | Yes |
+| `/api/history` | `GET` | Fetches historical messages for a given `sessionId` / `threadId`. | Yes |
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Purpose |
+| :--- | :--- | :--- |
+| **Framework** | Next.js 14 (App Router) | Full-stack serverless framework |
+| **Language** | TypeScript | Type safety across API & UI |
+| **Styling** | Tailwind CSS + shadcn/ui | UI components and styling |
+| **Auth** | Clerk (`@clerk/nextjs`) | Authentication & User Management |
+| **LLM Inference** | Groq (`llama-3.1-8b-instant`) | Fast token streaming response |
+| **Embeddings** | Google Gemini (`gemini-embedding-001`) | 3072-dimensional vector generation |
+| **Vector Database**| Supabase Postgres (`pgvector`) | Storage & Similarity Search (RPC) |
+| **Rate Limiting** | Upstash Redis | Sliding window endpoint protection |
+| **Monorepo** | Turborepo + npm workspaces | Monorepo structure management |
+
+---
+
+## Project Structure
+
+```
+ai-pdf-chatbot-langchain/
+├── frontend/
+│   ├── app/
+│   │   ├── (auth)/                 # Clerk authentication pages
+│   │   ├── api/
+│   │   │   ├── chat/route.ts       # RAG logic + streaming completion
+│   │   │   ├── history/route.ts    # Thread history fetcher
+│   │   │   └── ingest/route.ts     # Document parsing & vector storage
+│   │   └── page.tsx                # Main Chat & PDF Upload UI
+│   ├── lib/
+│   │   ├── auth.ts                 # Clerk server helpers
+│   │   ├── pdf.ts                  # PDF parsing wrapper
+│   │   ├── ratelimit.ts            # Upstash sliding-window config
+│   │   └── supabase.ts             # Supabase browser client
+│   └── middleware.ts               # Route protection & auth gating
+└── supabase/
+    └── migrations/                 # PostgreSQL & pgvector schema migrations
+```
+
+---
+
+## Getting Started
+
+### 1. Prerequisites
+
+Obtain API keys from the following services before getting started:
+- [Supabase](https://supabase.com) (Postgres Database with `pgvector` enabled)
+- [Clerk Application](https://dashboard.clerk.com)
+- [Groq Console API Key](https://console.groq.com)
+- [Google AI Studio API Key](https://aistudio.google.com) (*Note: Google Cloud Console keys are not supported*)
+- [Upstash Redis Database](https://upstash.com)
+
+### 2. Installation
+
+Clone the repository and install dependencies:
+
+```bash
+git clone <your-repo-url>
+cd ai-pdf-chatbot-langchain
+npm install
+```
+
+### 3. Database Migration
+
+Run the migration scripts in order within your Supabase SQL Editor:
+
+1. `supabase/migrations/001_add_user_id_and_rls.sql`
+2. `supabase/migrations/002_add_thread_id.sql`
+
+### 4. Environment Variables
+
+Create a `.env` file inside the `frontend/` directory:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+Populate `frontend/.env` with your service credentials:
+
+```env
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# AI Providers
+GROQ_API_KEY=gsk_...
+GOOGLE_API_KEY=AIzaSy...
+
+# Rate Limiting (Upstash)
+UPSTASH_REDIS_REST_URL=https://...upstash.io
+UPSTASH_REDIS_REST_TOKEN=...
+
+# Auth (Clerk)
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
+NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/
+```
+
+### 5. Run the Application
+
+Start the development server:
+
+```bash
+npm run dev --workspace=frontend
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## Database Schema
+
+### `documents`
+Stores parsed PDF chunks and vector embeddings scoped by user and thread.
+
+```sql
+create table documents (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  thread_id text,
+  content text,
+  metadata jsonb,
+  embedding vector(3072)
+);
+```
+
+### `chat_history`
+Stores persistent chat messages for session recovery.
+
+```sql
+create table chat_history (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  session_id text not null,
+  role text not null check (role in ('user', 'assistant')),
+  content text not null,
+  sources jsonb,
+  created_at timestamptz default now()
+);
+```
+
+---
+
+## Critical Gotchas & Notes
+
+> **Google API Key Source**: Embeddings require model `gemini-embedding-001` (3072 dimensions). Your key **must** come from [Google AI Studio](https://aistudio.google.com). Keys generated via Google Cloud Console (starting with `AQ.`) will fail.
+
+> **Vector Dimensions**: The database schema explicitly targets `vector(3072)`. Switching to a different embedding provider or model requires updating the column definition and re-indexing existing documents.
+
+> **Thread & Session Mapping**: In the UI (`app/page.tsx`), `sessionId` and `threadId` utilize the same generated UUID to isolate document context and chat history simultaneously.
+
+---
+
+## Roadmap & Future Enhancements
+
+- [ ] **Deployment**: Add Vercel deployment configuration and build scripts.
+- [ ] **Document Management**: Build UI for viewing, downloading, and deleting uploaded documents.
+- [ ] **Multi-Turn Contextual Retrieval**: Rephrase questions based on chat history before querying the vector database.
+- [ ] **Dead Code Cleanup**: Remove legacy unused LangGraph client utilities (`frontend/lib/langgraph-*`).
+
+---
+
+## License
+
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.

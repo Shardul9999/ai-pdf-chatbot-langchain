@@ -1,4 +1,4 @@
-# AI PDF Chatbot
+<!-- # AI PDF Chatbot
 
 A full-stack RAG (Retrieval-Augmented Generation) chatbot. Upload PDFs, they get
 chunked and embedded into a vector store, and a chat interface answers questions
@@ -194,4 +194,33 @@ defense-in-depth backstop rather than the primary access control.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). -->
+
+# AI PDF Chatbot
+
+![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat&logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=flat&logo=typescript)
+![Supabase](https://img.shields.io/badge/Supabase-pgvector-emerald?style=flat&logo=supabase)
+![Groq](https://img.shields.io/badge/LLM-Groq%20Llama%203.1-orange?style=flat)
+![Clerk](https://img.shields.io/badge/Auth-Clerk-6C47FF?style=flat&logo=clerk)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat)
+
+A full-stack Retrieval-Augmented Generation (RAG) chatbot application. Upload PDFs, auto-generate vector embeddings stored in Supabase (`pgvector`), and ask questions in a real-time streamed chat interface—fully isolated per user and chat thread.
+
+Originally derived from the [Learning LangChain (O'Reilly)](https://www.oreilly.com/library/view/learning-langchain/9781098167271) template, this project folds the backend RAG pipeline directly into Next.js API routes for a streamlined, serverless-ready architecture.
+
+---
+
+## Key Features
+
+- **PDF Ingestion & Chunking**: Parses PDFs on the fly (`pdf-parse`), chunks text, and generates 3072-dimensional vector embeddings using Google Gemini.
+- **Context-Aware RAG Chat**: Answers questions strictly using retrieved document context with token-by-token streaming via Groq (`llama-3.1-8b-instant`).
+- **User & Thread Isolation**: Strict multi-tenant isolation via Clerk authentication and database Row-Level Security (RLS). Embeddings and chats are filtered by both `user_id` and `thread_id`.
+- **Chat History Persistence**: Reloads conversation history per session directly from Supabase.
+- **Rate Limiting**: Sliding-window rate limiting on ingestion and chat endpoints powered by Upstash Redis.
+
+---
+
+## Architecture
+
+The standalone LangGraph server (`backend/`, port 2024) has been retired and consolidated directly into Next.js API Routes (`frontend/app/api/*`).

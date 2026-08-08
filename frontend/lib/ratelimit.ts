@@ -11,6 +11,10 @@ export const rateLimiter = new Ratelimit({
 export async function checkRateLimit(
   identifier: string,
 ): Promise<{ success: boolean; limit: number; remaining: number }> {
-  const result = await rateLimiter.limit(identifier);
-  return result;
+  try {
+    return await rateLimiter.limit(identifier);
+  } catch (err) {
+    console.error('[ratelimit] Upstash unreachable, failing open:', err);
+    return { success: true, limit: 0, remaining: 0 };
+  }
 }

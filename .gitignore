@@ -56,3 +56,9 @@ test_docs
 
 # quarantined non-project files (see extrathings/)
 extrathings/
+
+# personal/machine-local Claude Code settings — not shared config
+.claude/settings.local.json
+
+# regenerated dev instrumentation output
+frontend/performance_metrics.json

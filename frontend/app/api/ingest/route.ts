@@ -160,13 +160,24 @@ export async function POST(request: NextRequest) {
       process.env.SUPABASE_SERVICE_ROLE_KEY,
     );
 
-    const rows = safeChunks.map((chunk, i) => ({
-      user_id: userId,
-      thread_id: threadId,
-      content: chunk.pageContent,
-      metadata: chunk.metadata,
-      embedding: vectors[i],
-    }));
+    // chunk_index is per-filename (not global) so the document-management
+    // "download" feature can reconstruct each file's chunks in original order.
+    const chunkIndexByFile: Record<string, number> = {};
+    const rows = safeChunks.map((chunk, i) => {
+      const filename =
+        typeof chunk.metadata?.filename === 'string'
+          ? chunk.metadata.filename
+          : 'unknown';
+      const chunkIndex = chunkIndexByFile[filename] ?? 0;
+      chunkIndexByFile[filename] = chunkIndex + 1;
+      return {
+        user_id: userId,
+        thread_id: threadId,
+        content: chunk.pageContent,
+        metadata: { ...chunk.metadata, chunk_index: chunkIndex },
+        embedding: vectors[i],
+      };
+    });
 
     // PERF - remove before production
     const t0insert = Date.now();

@@ -77,7 +77,9 @@ export default function Home() {
   const firstName = user?.firstName;
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
+  const [docs, setDocs] = useState<{ filename: string; chunkCount: number }[]>(
+    [],
+  );
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(true);
@@ -251,6 +253,12 @@ export default function Home() {
     }
   }, [isHistoryLoading]);
 
+  // ── Document list: reload whenever the active thread changes ─────────────
+  useEffect(() => {
+    if (threadId) refreshDocuments(threadId);
+    else setDocs([]);
+  }, [threadId]);
+
   // ── Session helpers ───────────────────────────────────────────────────────
   const createNewSession = () => {
     const id = crypto.randomUUID();
@@ -259,12 +267,75 @@ export default function Home() {
     setSessionId(id);
     setThreadId(id);
     setMessages([]);
+    setDocs([]);
+  };
+
+  // ── Document management ───────────────────────────────────────────────────
+  const refreshDocuments = async (tid: string) => {
+    try {
+      const res = await fetch(`/api/documents?threadId=${tid}`);
+      if (!res.ok) return;
+      const { documents } = await res.json();
+      setDocs(Array.isArray(documents) ? documents : []);
+    } catch {
+      // Non-fatal: document list just won't update this round.
+    }
+  };
+
+  const handleDeleteDocument = async (filename: string) => {
+    if (!threadId) return;
+    try {
+      const res = await fetch('/api/documents', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threadId, filename }),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error || 'Delete failed');
+      }
+      setDocs((prev) => prev.filter((d) => d.filename !== filename));
+      toast({ title: 'Deleted', description: `${filename} removed` });
+    } catch (err) {
+      toast({
+        title: 'Delete failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDownloadDocument = async (filename: string) => {
+    if (!threadId) return;
+    try {
+      const res = await fetch(
+        `/api/documents/download?threadId=${threadId}&filename=${encodeURIComponent(filename)}`,
+      );
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error || 'Download failed');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename.replace(/\.pdf$/i, '') + '.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast({
+        title: 'Download failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleNewChat = () => {
     localStorage.removeItem(SESSION_ID_KEY);
     localStorage.removeItem(THREAD_ID_KEY);
-    setFiles([]);
     setInput('');
     createNewSession();
     toast({
@@ -407,7 +478,7 @@ export default function Home() {
         const d = await res.json();
         throw new Error(d.error || 'Upload failed');
       }
-      setFiles((prev) => [...prev, ...selected]);
+      await refreshDocuments(threadId);
       toast({
         title: 'Uploaded',
         description: `${selected.length} file${selected.length > 1 ? 's' : ''} ready`,
@@ -454,7 +525,7 @@ export default function Home() {
         const d = await res.json();
         throw new Error(d.error || 'Upload failed');
       }
-      setFiles((prev) => [...prev, ...selected]);
+      await refreshDocuments(threadId);
       toast({
         title: 'Uploaded',
         description: `${selected.length} file${selected.length > 1 ? 's' : ''} ready`,
@@ -734,18 +805,18 @@ export default function Home() {
             </span>
           </div>
         </div>
-        {files.length > 0 && (
+        {docs.length > 0 && (
           <div
             style={{
               display: 'flex',
               gap: '6px',
               flexWrap: 'wrap',
-              maxWidth: '280px',
+              maxWidth: '360px',
             }}
           >
-            {files.map((f, i) => (
+            {docs.map((d) => (
               <div
-                key={i}
+                key={d.filename}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -759,6 +830,7 @@ export default function Home() {
               >
                 <span>📄</span>
                 <span
+                  title={`${d.filename} · ${d.chunkCount} chunk${d.chunkCount === 1 ? '' : 's'}`}
                   style={{
                     maxWidth: '110px',
                     overflow: 'hidden',
@@ -766,10 +838,26 @@ export default function Home() {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {f.name}
+                  {d.filename}
                 </span>
                 <button
-                  onClick={() => setFiles(files.filter((_, j) => j !== i))}
+                  onClick={() => handleDownloadDocument(d.filename)}
+                  title="Download extracted text"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: textSecondary,
+                    cursor: 'pointer',
+                    padding: 0,
+                    lineHeight: 1,
+                    fontSize: '12px',
+                  }}
+                >
+                  ⬇
+                </button>
+                <button
+                  onClick={() => handleDeleteDocument(d.filename)}
+                  title="Delete document"
                   style={{
                     background: 'none',
                     border: 'none',

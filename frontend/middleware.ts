@@ -4,6 +4,8 @@ const isProtectedRoute = createRouteMatcher([
   '/api/ingest',
   '/api/chat',
   '/api/history',
+  '/api/documents',
+  '/api/documents/download',
   '/',
 ]);
 

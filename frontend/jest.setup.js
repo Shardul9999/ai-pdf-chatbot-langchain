@@ -15,10 +15,6 @@ global.fetch = fetch;
 global.Request = Request;
 global.Response = Response;
 
-// Mock environment variables
-process.env.NEXT_PUBLIC_LANGGRAPH_API_URL = 'http://localhost:2024';
-process.env.LANGCHAIN_API_KEY = 'test-key';
-
 // Mock the performance API
 global.performance = {
   getEntriesByName: () => [], // Provide a mock implementation

@@ -17,7 +17,8 @@ import { appendMetric } from '@/lib/perf'; // PERF - remove before production
 export const runtime = 'nodejs';
 
 const SYSTEM_PROMPT =
-  'You are a helpful assistant. Answer questions based on the provided document context. ' +
+  'You are a helpful assistant. The context below consists of text extracted from PDF files the user uploaded, ' +
+  'labeled by their original filename. Answer questions based on this context, referring to sources by filename when relevant. ' +
   'If the context does not contain relevant information, say so clearly but still try to be helpful.';
 
 export async function POST(req: Request) {
@@ -155,11 +156,17 @@ export async function POST(req: Request) {
           }
         }
 
-        // --- 3. Build context string from retrieved docs ---
+        // --- 3. Build context string from retrieved docs, labeled by source PDF filename ---
         const context =
           retrievedDocs.length > 0
             ? retrievedDocs
-                .map((d, i) => `[Document ${i + 1}]\n${d.pageContent}`)
+                .map((d) => {
+                  const filename =
+                    typeof d.metadata?.filename === 'string'
+                      ? d.metadata.filename
+                      : 'uploaded document';
+                  return `[Source: ${filename}]\n${d.pageContent}`;
+                })
                 .join('\n\n---\n\n')
             : 'No relevant documents found.';
 

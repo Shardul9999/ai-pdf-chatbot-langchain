@@ -242,27 +242,27 @@ POST /api/ingest               POST /api/chat                  GET /api/history
 
 ### API Reference
 
-| Endpoint | Method | Description | Auth Required |
-| :--- | :--- | :--- | :--- |
-| `/api/ingest` | `POST` | Accepts multipart PDF data, chunks, embeds, and stores vectors. | Yes |
-| `/api/chat` | `POST` | Accepts user prompt, performs vector similarity search, streams LLM output. | Yes |
-| `/api/history` | `GET` | Fetches historical messages for a given `sessionId` / `threadId`. | Yes |
+| Endpoint       | Method | Description                                                                 | Auth Required |
+| :------------- | :----- | :-------------------------------------------------------------------------- | :------------ |
+| `/api/ingest`  | `POST` | Accepts multipart PDF data, chunks, embeds, and stores vectors.             | Yes           |
+| `/api/chat`    | `POST` | Accepts user prompt, performs vector similarity search, streams LLM output. | Yes           |
+| `/api/history` | `GET`  | Fetches historical messages for a given `sessionId` / `threadId`.           | Yes           |
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology | Purpose |
-| :--- | :--- | :--- |
-| **Framework** | Next.js 14 (App Router) | Full-stack serverless framework |
-| **Language** | TypeScript | Type safety across API & UI |
-| **Styling** | Tailwind CSS + shadcn/ui | UI components and styling |
-| **Auth** | Clerk (`@clerk/nextjs`) | Authentication & User Management |
-| **LLM Inference** | Groq (`llama-3.1-8b-instant`) | Fast token streaming response |
-| **Embeddings** | Google Gemini (`gemini-embedding-001`) | 3072-dimensional vector generation |
-| **Vector Database**| Supabase Postgres (`pgvector`) | Storage & Similarity Search (RPC) |
-| **Rate Limiting** | Upstash Redis | Sliding window endpoint protection |
-| **Monorepo** | Turborepo + npm workspaces | Monorepo structure management |
+| Layer               | Technology                             | Purpose                            |
+| :------------------ | :------------------------------------- | :--------------------------------- |
+| **Framework**       | Next.js 14 (App Router)                | Full-stack serverless framework    |
+| **Language**        | TypeScript                             | Type safety across API & UI        |
+| **Styling**         | Tailwind CSS + shadcn/ui               | UI components and styling          |
+| **Auth**            | Clerk (`@clerk/nextjs`)                | Authentication & User Management   |
+| **LLM Inference**   | Groq (`llama-3.1-8b-instant`)          | Fast token streaming response      |
+| **Embeddings**      | Google Gemini (`gemini-embedding-001`) | 3072-dimensional vector generation |
+| **Vector Database** | Supabase Postgres (`pgvector`)         | Storage & Similarity Search (RPC)  |
+| **Rate Limiting**   | Upstash Redis                          | Sliding window endpoint protection |
+| **Monorepo**        | Turborepo + npm workspaces             | Monorepo structure management      |
 
 ---
 
@@ -295,10 +295,11 @@ ai-pdf-chatbot-langchain/
 ### 1. Prerequisites
 
 Obtain API keys from the following services before getting started:
+
 - [Supabase](https://supabase.com) (Postgres Database with `pgvector` enabled)
 - [Clerk Application](https://dashboard.clerk.com)
 - [Groq Console API Key](https://console.groq.com)
-- [Google AI Studio API Key](https://aistudio.google.com) (*Note: Google Cloud Console keys are not supported*)
+- [Google AI Studio API Key](https://aistudio.google.com) (_Note: Google Cloud Console keys are not supported_)
 - [Upstash Redis Database](https://upstash.com)
 
 ### 2. Installation
@@ -367,6 +368,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 ## Database Schema
 
 ### `documents`
+
 Stores parsed PDF chunks and vector embeddings scoped by user and thread.
 
 ```sql
@@ -381,6 +383,7 @@ create table documents (
 ```
 
 ### `chat_history`
+
 Stores persistent chat messages for session recovery.
 
 ```sql
@@ -409,10 +412,10 @@ create table chat_history (
 
 ## Roadmap & Future Enhancements
 
+- [x] **Document Management**: List, download (as extracted text), and delete uploaded documents per chat thread, via `GET`/`DELETE /api/documents` and `GET /api/documents/download`.
+- [x] **Dead Code Cleanup**: Removed legacy unused LangGraph client utilities (`frontend/lib/langgraph-*`) and their stale test.
 - [ ] **Deployment**: Add Vercel deployment configuration and build scripts.
-- [ ] **Document Management**: Build UI for viewing, downloading, and deleting uploaded documents.
 - [ ] **Multi-Turn Contextual Retrieval**: Rephrase questions based on chat history before querying the vector database.
-- [ ] **Dead Code Cleanup**: Remove legacy unused LangGraph client utilities (`frontend/lib/langgraph-*`).
 
 ---
 

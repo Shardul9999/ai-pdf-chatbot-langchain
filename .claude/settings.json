@@ -4,7 +4,10 @@
       {
         "matcher": "Edit|Write",
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/block-env-edit.mjs" }
+          {
+            "type": "command",
+            "command": "node .claude/hooks/block-env-edit.mjs"
+          }
         ]
       }
     ],
@@ -12,7 +15,10 @@
       {
         "matcher": "Edit|Write",
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/format-on-edit.mjs" }
+          {
+            "type": "command",
+            "command": "node .claude/hooks/format-on-edit.mjs"
+          }
         ]
       }
     ]

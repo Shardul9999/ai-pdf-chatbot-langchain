@@ -9,6 +9,7 @@ This project has been bitten twice by "works locally, fails in CI" bugs caused b
 Steps:
 
 1. Pick a scratch directory (use the session's scratchpad if available, otherwise a temp dir) and clone fresh from the local repo:
+
    ```bash
    rm -rf <scratch>/ci-repro
    git clone e:/ai-pdf-chatbot-langchain <scratch>/ci-repro
@@ -16,11 +17,13 @@ Steps:
    ```
 
 2. Run a genuinely clean install (not `--package-lock-only`, not reusing any existing `node_modules`):
+
    ```bash
    npm ci
    ```
 
 3. Run the exact checks CI runs:
+
    ```bash
    npm run format:check
    npm run lint

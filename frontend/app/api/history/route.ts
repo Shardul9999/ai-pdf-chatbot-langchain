@@ -1,50 +1,51 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUserId } from '@/lib/auth';
-import { createClient } from '@supabase/supabase-js';
+import { z } from 'zod';
+import { apiError, ApiError, authorize, sessionSchema } from '@/lib/api';
+import { getDatabase } from '@/lib/server-db';
 
 export const runtime = 'nodejs';
 
 export async function GET(req: Request) {
-  let userId: string;
   try {
-    userId = await getCurrentUserId();
-  } catch {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const { searchParams } = new URL(req.url);
-  const sessionId = searchParams.get('sessionId');
-  if (!sessionId) {
-    return NextResponse.json(
-      { error: 'sessionId is required' },
-      { status: 400 },
-    );
-  }
-
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return NextResponse.json({ messages: [] });
-  }
-
-  try {
-    const supabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-    );
-    const { data, error } = await supabase
+    const userId = await authorize(req, 'read');
+    const params = new URL(req.url).searchParams;
+    const sessionId = sessionSchema.parse(params.get('sessionId'));
+    const before = params.get('before');
+    let query = getDatabase()
       .from('chat_history')
       .select('id, session_id, role, content, sources, created_at')
-      .eq('session_id', sessionId)
       .eq('user_id', userId)
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      console.error('[history] Supabase error:', error.message);
-      return NextResponse.json({ messages: [] });
+      .eq('session_id', sessionId);
+    if (before) {
+      let decoded: unknown;
+      try {
+        decoded = JSON.parse(before);
+      } catch {
+        throw new ApiError(400, 'Invalid history cursor');
+      }
+      const cursor = z
+        .object({
+          time: z.string().datetime({ offset: true }),
+          id: z.string().uuid(),
+        })
+        .parse(decoded);
+      query = query.or(
+        `created_at.lt.${cursor.time},and(created_at.eq.${cursor.time},id.lt.${cursor.id})`,
+      );
     }
-
-    return NextResponse.json({ messages: data ?? [] });
-  } catch (err: any) {
-    console.error('[history] Error:', err?.message ?? err);
-    return NextResponse.json({ messages: [] });
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(101);
+    if (error) throw new Error('History load failed');
+    const page = (data ?? []).slice(0, 100);
+    const last = page.at(-1);
+    const nextCursor =
+      data && data.length > 100 && last
+        ? JSON.stringify({ time: last.created_at, id: last.id })
+        : null;
+    return NextResponse.json({ messages: page.reverse(), nextCursor });
+  } catch (error) {
+    return apiError(error);
   }
 }

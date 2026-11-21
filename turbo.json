@@ -1,16 +1,14 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["**/.env"],
+  "globalDependencies": ["**/.env*"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["**/dist/**"]
+      "outputs": [".next/**", "!.next/cache/**"],
+      "env": ["NEXT_PUBLIC_CLERK_*"]
     },
-    "lint": {
-      "dependsOn": ["^lint"]
-    },
-    "format": {
-      "dependsOn": ["^format"]
-    }
+    "lint": {},
+    "typecheck": {},
+    "test": { "outputs": [] }
   }
 }

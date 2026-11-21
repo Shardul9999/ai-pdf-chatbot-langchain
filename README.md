@@ -1,424 +1,102 @@
-<!-- # AI PDF Chatbot
+# Readr — AI PDF chatbot
 
-A full-stack RAG (Retrieval-Augmented Generation) chatbot. Upload PDFs, they get
-chunked and embedded into a vector store, and a chat interface answers questions
-about them — scoped per signed-in user and per chat thread.
+Readr is a Next.js application for asking questions about uploaded PDFs. Clerk authenticates users; Supabase stores document chunks and chat history; Google Gemini creates embeddings; Groq streams answers. There is no separate backend server.
 
-Originally forked from the [Learning LangChain (O'Reilly)](https://www.oreilly.com/library/view/learning-langchain/9781098167271)
-template, which paired a Next.js frontend with a standalone LangGraph backend
-server. That backend has since been retired — see [Architecture](#architecture)
-below for what replaced it.
+## Quick start
 
-## Features
+Use Node.js 24 LTS and npm. From the repository root:
 
-- **PDF ingestion** — upload a PDF, it's parsed, split into chunks, embedded, and stored in Supabase (pgvector)
-- **RAG chat** — ask questions about your uploaded PDFs; answers are grounded in retrieved chunks, streamed token-by-token
-- **Auth** — Clerk-backed sign-in/sign-up; every route that touches data requires a signed-in user
-- **Per-user, per-thread isolation** — each user only ever retrieves their own documents, scoped further to the chat thread they were uploaded in
-- **Chat history persistence** — conversations reload from Supabase on page refresh
-- **Rate limiting** — ingest and chat endpoints are rate-limited per user via Upstash Redis
+```sh
+npm ci
+cp frontend/.env.example frontend/.env.local
+```
+
+Fill in the service credentials in `frontend/.env.local`, then apply the database migrations described below. Never put service keys in variables starting with `NEXT_PUBLIC_`.
+
+```sh
+npm run dev
+```
+
+Open `http://localhost:3000`. Create an account, upload a PDF, and ask a question. The account menu supports sign-out. Each account has its own locally remembered conversation; starting a new chat creates a new document scope.
+
+## Database setup and upgrades
+
+Back up an existing database before applying schema changes. Apply SQL files in `supabase/migrations` in numerical order using the Supabase SQL editor or your migration system:
+
+1. `001_add_user_id_and_rls.sql` creates missing tables without deleting existing rows.
+2. `002_add_thread_id.sql` adds thread scoping.
+3. `003_production_hardening.sql` removes legacy RPC overloads, requires owner/thread filters, restricts table and RPC privileges, and adds atomic document replacement.
+
+For databases that already applied 001 and 002, apply only **003** before deploying this version. Do not rerun an older checkout's destructive version of 001. The current 001 preserves rows; it cannot restore data deleted by past migrations.
+
+The `vector` extension and a **3072-dimensional** `documents.embedding` column are required. Existing schemas using other dimensions need an explicit data migration and re-embedding; these scripts deliberately do not drop or guess how to convert that data. Legacy rows without `user_id` or `thread_id` are retained but inaccessible through the application. Assign ownership only from verified records, or remove them under your retention policy.
+
+Clerk IDs are text. The browser has no Supabase access: authenticated Next.js handlers use a server-only service role key and scope every operation. `anon` and `authenticated` database roles cannot access these tables or RPCs. Service-role credentials bypass RLS and must remain private.
+
+## Configuration
+
+| Variable                            | Purpose                                                  |
+| ----------------------------------- | -------------------------------------------------------- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk public key, required at **build time and runtime** |
+| `CLERK_SECRET_KEY`                  | Clerk server secret                                      |
+| `SUPABASE_URL`                      | Supabase HTTPS project URL                               |
+| `SUPABASE_SERVICE_ROLE_KEY`         | Supabase server credential                               |
+| `GOOGLE_API_KEY`                    | Gemini embedding API credential                          |
+| `GROQ_API_KEY`                      | Groq chat API credential                                 |
+| `GROQ_MODEL`                        | Optional chat model; defaults to `llama-3.1-8b-instant`  |
+| `UPSTASH_REDIS_REST_URL`            | Upstash HTTPS endpoint                                   |
+| `UPSTASH_REDIS_REST_TOKEN`          | Upstash token; rate limiting is required                 |
+
+The example environment also specifies Clerk sign-in, sign-up, and fallback redirect paths. Use production Clerk keys and configure your deployed domain in Clerk for a public release. Restart or redeploy after changing secrets; rebuild after changing public settings.
+
+## Verification
+
+```sh
+npm run format:check
+npm run check
+npm audit
+npm run build
+npm start
+```
+
+`check` runs linting, TypeScript, API and stream regression tests, real PDF parsing, and isolated PostgreSQL/pgvector tests. Tests use mock AI/auth/storage services and an ephemeral database, never your live database. The build enforces TypeScript validation; CI also checks formatting, lint, tests, audit, and build. `npm start` validates required configuration before launching.
+
+For CI only, a syntactically valid placeholder Clerk publishable key allows build verification without real credentials. It does **not** verify sign-in or provider connectivity.
+
+## Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for container and managed-host instructions, rollout checks, and operational requirements.
+
+## Limits and behavior
+
+- At most 5 PDFs per request, 3 MB per file, and 4 MB total HTTP body (including multipart overhead).
+- At most 100 pages per file, 250,000 extracted characters per request, and 400 chunks per request. Image-only PDFs need OCR before upload.
+- PDF parsing runs in a disposable worker with a 30-second deadline and a 256 MB JavaScript heap budget. Configure container memory limits as well; native allocations are outside that heap budget.
+- Each user can store up to 4,000 chunks. Uploading the same filename in the same chat replaces it atomically. A parsing, embedding, or database failure preserves the previous upload.
+- Per-user rate limits: 10 chat requests, 3 uploads, 60 reads, and 20 deletes per minute. Missing or unavailable Redis returns an error instead of allowing unlimited usage.
+- Chat input is limited to 8,000 characters; answers to 2,048 model tokens. Retrieval uses 5 chunks and the newest 20 messages, with additional prompt-size bounds.
+- History loads in pages of 100 messages. Use **Load earlier messages** for older turns. Failed history reads are displayed as errors.
+- Downloads export extracted text, **not the original PDF**, and may include overlapping text from retrieval chunks. Original PDF bytes are not retained.
+- Deleting a document removes its retrieval chunks. Existing chat messages and their quoted sources remain until separately removed under the application's retention policy.
+- Chat replies are marked complete only after both messages have been saved. Interrupted replies display an error. A network failure after a committed write can still require refreshing to see the saved response; retries are not idempotent.
+
+## Data handling and operations
+
+PDF text is sent to Google for embeddings. Relevant excerpts, the question, and recent conversation history are sent to Groq for answers. Document text, embeddings, chat messages, and source excerpts are stored in Supabase. Explain this processing in your product's privacy notice before collecting user documents.
+
+The application logs generic failure categories, not document content or provider error payloads. `/api/health` is a public **liveness** endpoint; it does not prove external services are ready. Set provider budget alerts and database backups, monitor HTTP errors and latency, and define retention/account-deletion procedures before launch. Account deletion in Clerk does not automatically delete Supabase data.
+
+The repository has no production credentials or deployment target configured. Local checks do not replace a live two-account acceptance test and a capacity test for your expected traffic.
 
 ## Architecture
 
-There is no separate backend process. What used to be a standalone LangGraph
-dev server (`backend/`, port 2024) has been folded directly into Next.js API
-routes — everything runs in one deployable app.
-
-```
-Browser (app/page.tsx)
-  │
-  ├─ POST /api/ingest   → parse PDF → chunk → embed (Gemini) → insert into Supabase `documents`
-  ├─ POST /api/chat     → embed query → match_documents RPC (Supabase pgvector)
-  │                        → build context → stream answer from Groq → persist to `chat_history`
-  └─ GET  /api/history  → reload prior messages for the current thread on page load
+```text
+Browser → Clerk-authenticated Next.js handlers
+  Upload → bounded PDF worker → text chunks → Gemini embeddings
+         → atomic Supabase replacement scoped to user + thread
+  Chat   → scoped vector search + recent history → Groq stream
+         → atomic history insert → completion event
+  Manage → scoped document listing / text export / deletion
 ```
 
-All three API routes are gated by Clerk middleware and require a resolved
-`userId` before touching the database. Document retrieval and chat history are
-filtered by both `user_id` (Clerk) and `thread_id`/`session_id`, so users never
-see each other's documents, and starting a new chat gives a clean document
-context instead of pulling in every PDF a user has ever uploaded.
-
-## Tech Stack
-
-| Layer            | Technology                                                                          |
-| ---------------- | ----------------------------------------------------------------------------------- |
-| Framework        | Next.js 14 (App Router), TypeScript                                                 |
-| Styling          | Tailwind CSS + shadcn/ui (Radix primitives)                                         |
-| Auth             | Clerk (`@clerk/nextjs`)                                                             |
-| LLM              | Groq — `llama-3.1-8b-instant` (`@langchain/groq`)                                   |
-| Embeddings       | Google Gemini — `gemini-embedding-001`, 3072 dimensions (`@langchain/google-genai`) |
-| Vector store     | Supabase Postgres + `pgvector`, accessed via `@supabase/supabase-js`                |
-| Rate limiting    | Upstash Redis + `@upstash/ratelimit`                                                |
-| PDF parsing      | `pdf-parse`                                                                         |
-| Monorepo tooling | npm workspaces + Turborepo                                                          |
-
-## Project Structure
-
-```
-frontend/
-  app/
-    page.tsx                 # chat UI — state, streaming, uploads
-    api/
-      ingest/route.ts        # PDF upload → chunk → embed → store
-      chat/route.ts          # retrieval + Groq streaming + history persistence
-      history/route.ts       # reload chat history for a thread (service-role, RLS-safe)
-    (auth)/sign-in, sign-up/  # Clerk prebuilt auth pages
-  lib/
-    auth.ts                  # getCurrentUserId() — Clerk helper used by every API route
-    ratelimit.ts             # Upstash sliding-window rate limiter
-    supabase.ts               # browser-side Supabase client (anon key)
-    pdf.ts                    # PDF parsing helper
-    graphs/shared/
-      retrieval.ts            # SupabaseUserRetriever — user/thread-scoped vector search
-      configuration.ts        # env-aware retriever configuration
-  middleware.ts               # Clerk route protection
-supabase/
-  migrations/
-    001_add_user_id_and_rls.sql   # user_id columns + RLS on documents/chat_history
-    002_add_thread_id.sql         # thread_id column + updated match_documents RPC
-```
-
-## Prerequisites
-
-You'll need accounts/keys for:
-
-- A [Supabase](https://supabase.com) project with the `pgvector` extension enabled
-- A [Clerk](https://dashboard.clerk.com) application
-- A [Groq](https://console.groq.com) API key
-- A [Google AI Studio](https://aistudio.google.com) API key (**not** a Google Cloud Console key — see [Gotchas](#gotchas))
-- An [Upstash](https://upstash.com) Redis database (for rate limiting)
-
-## Setup
-
-```bash
-git clone <this-repo-url>
-cd ai-pdf-chatbot-langchain
-npm install
-```
-
-Apply the database schema — run the SQL files in `supabase/migrations/` against
-your Supabase project, in order, via the Supabase SQL editor or CLI:
-
-```
-supabase/migrations/001_add_user_id_and_rls.sql
-supabase/migrations/002_add_thread_id.sql
-```
-
-Copy `frontend/.env.example` to `frontend/.env` and fill in real values (see
-[Environment Variables](#environment-variables) below).
-
-Run it:
-
-```bash
-npm run dev --workspace=frontend
-```
-
-The app is served at `http://localhost:3000`.
-
-## Environment Variables
-
-All variables live in `frontend/.env`. See `frontend/.env.example` for the
-authoritative list of names.
-
-| Variable                                                     | Where it's used                                                               |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`                                   | Browser-side Supabase client                                                  |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`                              | Browser-side Supabase client (anon/public key)                                |
-| `SUPABASE_URL`                                               | Server-side (API routes)                                                      |
-| `SUPABASE_SERVICE_ROLE_KEY`                                  | Server-side only — full DB access, bypasses RLS. Never expose to the browser. |
-| `GROQ_API_KEY`                                               | Chat completion (`llama-3.1-8b-instant`)                                      |
-| `GOOGLE_API_KEY`                                             | Embeddings (`gemini-embedding-001`) — must come from aistudio.google.com      |
-| `UPSTASH_REDIS_REST_URL`                                     | Rate limiting                                                                 |
-| `UPSTASH_REDIS_REST_TOKEN`                                   | Rate limiting                                                                 |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`                          | Clerk client SDK                                                              |
-| `CLERK_SECRET_KEY`                                           | Clerk server SDK — server-side only                                           |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `_SIGN_UP_URL`             | Clerk route config (`/sign-in`, `/sign-up`)                                   |
-| `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` / `_AFTER_SIGN_UP_URL` | Clerk redirect targets (`/`)                                                  |
-
-## Database Schema
-
-`documents` — PDF chunks with embeddings, scoped by user and thread:
-
-```sql
-create table documents (
-  id uuid primary key default gen_random_uuid(),
-  user_id text not null,
-  thread_id text,
-  content text,
-  metadata jsonb,
-  embedding vector(3072)
-);
-```
-
-`chat_history` — persisted conversation turns, scoped by user and session:
-
-```sql
-create table chat_history (
-  id uuid primary key default gen_random_uuid(),
-  user_id text not null,
-  session_id text not null,
-  role text not null check (role in ('user', 'assistant')),
-  content text not null,
-  sources jsonb,
-  created_at timestamptz default now()
-);
-```
-
-Retrieval goes through a `match_documents` RPC that accepts `p_user_id` and
-`p_thread_id` filters (see `supabase/migrations/002_add_thread_id.sql` for the
-exact signature). Row Level Security is enabled on both tables; since every
-write happens server-side through Next.js API routes using the service-role
-key (already gated by Clerk before any DB call), the RLS policies are a
-defense-in-depth backstop rather than the primary access control.
-
-## Gotchas
-
-- **Google embedding model**: the correct model is `gemini-embedding-001`
-  (3072 dimensions). Keys must come from aistudio.google.com — keys from
-  Google Cloud Console (`AQ.` prefix) do not work with this API.
-- **Vector dimensions**: the schema uses `vector(3072)`. Changing embedding
-  models with a different dimension count requires dropping and recreating
-  the `documents` table.
-- **Session/thread IDs**: the frontend uses a single UUID as both `sessionId`
-  and `threadId` (see `createNewSession()` in `app/page.tsx`) — they are the
-  same value, not two independent identifiers.
-
-## Known Limitations
-
-- Not yet deployed — the app runs locally only; a Vercel deploy has not been done
-- `frontend/lib/langgraph-client.ts` and `langgraph-server.ts` are dead code
-  left over from the pre-migration architecture and are not imported anywhere
-- No UI to delete previously uploaded documents
-- Retrieval only considers the current question, not prior conversation turns
-
-## License
-
-MIT — see [LICENSE](LICENSE). -->
-
-# AI PDF Chatbot
-
-![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat&logo=next.js)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=flat&logo=typescript)
-![Supabase](https://img.shields.io/badge/Supabase-pgvector-emerald?style=flat&logo=supabase)
-![Groq](https://img.shields.io/badge/LLM-Groq%20Llama%203.1-orange?style=flat)
-![Clerk](https://img.shields.io/badge/Auth-Clerk-6C47FF?style=flat&logo=clerk)
-![License](https://img.shields.io/badge/License-MIT-green?style=flat)
-
-A full-stack Retrieval-Augmented Generation (RAG) chatbot application. Upload PDFs, auto-generate vector embeddings stored in Supabase (`pgvector`), and ask questions in a real-time streamed chat interface—fully isolated per user and chat thread.
-
-Originally derived from the [Learning LangChain (O'Reilly)](https://www.oreilly.com/library/view/learning-langchain/9781098167271) template, this project folds the backend RAG pipeline directly into Next.js API routes for a streamlined, serverless-ready architecture.
-
----
-
-## Key Features
-
-- **PDF Ingestion & Chunking**: Parses PDFs on the fly (`pdf-parse`), chunks text, and generates 3072-dimensional vector embeddings using Google Gemini.
-- **Context-Aware RAG Chat**: Answers questions strictly using retrieved document context with token-by-token streaming via Groq (`llama-3.1-8b-instant`).
-- **User & Thread Isolation**: Strict multi-tenant isolation via Clerk authentication and database Row-Level Security (RLS). Embeddings and chats are filtered by both `user_id` and `thread_id`.
-- **Chat History Persistence**: Reloads conversation history per session directly from Supabase.
-- **Rate Limiting**: Sliding-window rate limiting on ingestion and chat endpoints powered by Upstash Redis.
-
----
-
-## Architecture
-
-The standalone LangGraph server (`backend/`, port 2024) has been retired and consolidated directly into Next.js API Routes (`frontend/app/api/*`).
-
-```
-                              ┌──────────────────────────┐
-                              │  Browser (app/page.tsx)  │
-                              └────────────┬─────────────┘
-                                           │
-           ┌───────────────────────────────┼───────────────────────────────┐
-           │                               │                               │
-           ▼                               ▼                               ▼
-POST /api/ingest               POST /api/chat                  GET /api/history
- ├─ Parse PDF (`pdf-parse`)     ├─ Embed Query (Gemini)         └─ Fetch prior messages
- ├─ Chunk & Embed (Gemini)      ├─ Similarity Match (pgvector)     filtered by `user_id`
- └─ Store in Supabase           ├─ Stream Answer (Groq)            and `session_id`
-    `documents` table           └─ Persist to `chat_history`
-```
-
-### API Reference
-
-| Endpoint       | Method | Description                                                                 | Auth Required |
-| :------------- | :----- | :-------------------------------------------------------------------------- | :------------ |
-| `/api/ingest`  | `POST` | Accepts multipart PDF data, chunks, embeds, and stores vectors.             | Yes           |
-| `/api/chat`    | `POST` | Accepts user prompt, performs vector similarity search, streams LLM output. | Yes           |
-| `/api/history` | `GET`  | Fetches historical messages for a given `sessionId` / `threadId`.           | Yes           |
-
----
-
-## Tech Stack
-
-| Layer               | Technology                             | Purpose                            |
-| :------------------ | :------------------------------------- | :--------------------------------- |
-| **Framework**       | Next.js 14 (App Router)                | Full-stack serverless framework    |
-| **Language**        | TypeScript                             | Type safety across API & UI        |
-| **Styling**         | Tailwind CSS + shadcn/ui               | UI components and styling          |
-| **Auth**            | Clerk (`@clerk/nextjs`)                | Authentication & User Management   |
-| **LLM Inference**   | Groq (`llama-3.1-8b-instant`)          | Fast token streaming response      |
-| **Embeddings**      | Google Gemini (`gemini-embedding-001`) | 3072-dimensional vector generation |
-| **Vector Database** | Supabase Postgres (`pgvector`)         | Storage & Similarity Search (RPC)  |
-| **Rate Limiting**   | Upstash Redis                          | Sliding window endpoint protection |
-| **Monorepo**        | Turborepo + npm workspaces             | Monorepo structure management      |
-
----
-
-## Project Structure
-
-```
-ai-pdf-chatbot-langchain/
-├── frontend/
-│   ├── app/
-│   │   ├── (auth)/                 # Clerk authentication pages
-│   │   ├── api/
-│   │   │   ├── chat/route.ts       # RAG logic + streaming completion
-│   │   │   ├── history/route.ts    # Thread history fetcher
-│   │   │   └── ingest/route.ts     # Document parsing & vector storage
-│   │   └── page.tsx                # Main Chat & PDF Upload UI
-│   ├── lib/
-│   │   ├── auth.ts                 # Clerk server helpers
-│   │   ├── pdf.ts                  # PDF parsing wrapper
-│   │   ├── ratelimit.ts            # Upstash sliding-window config
-│   │   └── supabase.ts             # Supabase browser client
-│   └── middleware.ts               # Route protection & auth gating
-└── supabase/
-    └── migrations/                 # PostgreSQL & pgvector schema migrations
-```
-
----
-
-## Getting Started
-
-### 1. Prerequisites
-
-Obtain API keys from the following services before getting started:
-
-- [Supabase](https://supabase.com) (Postgres Database with `pgvector` enabled)
-- [Clerk Application](https://dashboard.clerk.com)
-- [Groq Console API Key](https://console.groq.com)
-- [Google AI Studio API Key](https://aistudio.google.com) (_Note: Google Cloud Console keys are not supported_)
-- [Upstash Redis Database](https://upstash.com)
-
-### 2. Installation
-
-Clone the repository and install dependencies:
-
-```bash
-git clone <your-repo-url>
-cd ai-pdf-chatbot-langchain
-npm install
-```
-
-### 3. Database Migration
-
-Run the migration scripts in order within your Supabase SQL Editor:
-
-1. `supabase/migrations/001_add_user_id_and_rls.sql`
-2. `supabase/migrations/002_add_thread_id.sql`
-
-### 4. Environment Variables
-
-Create a `.env` file inside the `frontend/` directory:
-
-```bash
-cp frontend/.env.example frontend/.env
-```
-
-Populate `frontend/.env` with your service credentials:
-
-```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-
-# AI Providers
-GROQ_API_KEY=gsk_...
-GOOGLE_API_KEY=AIzaSy...
-
-# Rate Limiting (Upstash)
-UPSTASH_REDIS_REST_URL=https://...upstash.io
-UPSTASH_REDIS_REST_TOKEN=...
-
-# Auth (Clerk)
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-CLERK_SECRET_KEY=sk_test_...
-NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
-NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
-NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/
-```
-
-### 5. Run the Application
-
-Start the development server:
-
-```bash
-npm run dev --workspace=frontend
-```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
----
-
-## Database Schema
-
-### `documents`
-
-Stores parsed PDF chunks and vector embeddings scoped by user and thread.
-
-```sql
-create table documents (
-  id uuid primary key default gen_random_uuid(),
-  user_id text not null,
-  thread_id text,
-  content text,
-  metadata jsonb,
-  embedding vector(3072)
-);
-```
-
-### `chat_history`
-
-Stores persistent chat messages for session recovery.
-
-```sql
-create table chat_history (
-  id uuid primary key default gen_random_uuid(),
-  user_id text not null,
-  session_id text not null,
-  role text not null check (role in ('user', 'assistant')),
-  content text not null,
-  sources jsonb,
-  created_at timestamptz default now()
-);
-```
-
----
-
-## Critical Gotchas & Notes
-
-> **Google API Key Source**: Embeddings require model `gemini-embedding-001` (3072 dimensions). Your key **must** come from [Google AI Studio](https://aistudio.google.com). Keys generated via Google Cloud Console (starting with `AQ.`) will fail.
-
-> **Vector Dimensions**: The database schema explicitly targets `vector(3072)`. Switching to a different embedding provider or model requires updating the column definition and re-indexing existing documents.
-
-> **Thread & Session Mapping**: In the UI (`app/page.tsx`), `sessionId` and `threadId` utilize the same generated UUID to isolate document context and chat history simultaneously.
-
----
-
-## Roadmap & Future Enhancements
-
-- [x] **Document Management**: List, download (as extracted text), and delete uploaded documents per chat thread, via `GET`/`DELETE /api/documents` and `GET /api/documents/download`.
-- [x] **Dead Code Cleanup**: Removed legacy unused LangGraph client utilities (`frontend/lib/langgraph-*`) and their stale test.
-- [ ] **Deployment**: Add Vercel deployment configuration and build scripts.
-- [ ] **Multi-Turn Contextual Retrieval**: Rephrase questions based on chat history before querying the vector database.
-
----
-
-## License
-
-Distributed under the MIT License. See [LICENSE](LICENSE) for details.
+Fonts are bundled locally, so builds do not depend on Google Fonts access. See [LICENSE](LICENSE) for licensing.

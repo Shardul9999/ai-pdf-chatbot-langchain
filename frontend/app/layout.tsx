@@ -1,15 +1,13 @@
 import type React from 'react';
 import type { Metadata } from 'next';
-import { Plus_Jakarta_Sans } from 'next/font/google';
 import { Toaster } from '@/components/ui/toaster';
 import { ClerkProvider } from '@clerk/nextjs';
 
+import '@fontsource/plus-jakarta-sans/400.css';
+import '@fontsource/plus-jakarta-sans/500.css';
+import '@fontsource/plus-jakarta-sans/600.css';
+import '@fontsource/plus-jakarta-sans/700.css';
 import './globals.css';
-
-const font = Plus_Jakarta_Sans({
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '600', '700'],
-});
 
 export const metadata: Metadata = {
   title: 'Readr — AI Research Assistant',
@@ -24,7 +22,7 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en">
-        <body className={font.className}>
+        <body style={{ fontFamily: '"Plus Jakarta Sans", sans-serif' }}>
           {children}
           <Toaster />
         </body>

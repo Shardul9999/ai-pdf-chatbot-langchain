@@ -1,53 +1,93 @@
-import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
+import { Worker } from 'node:worker_threads';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { Document } from '@langchain/core/documents';
-import fs from 'fs/promises';
-import os from 'os';
-import path from 'path';
+import { ApiError } from '@/lib/api';
+import { MAX_PAGES, MAX_TEXT_CHARS } from '@/lib/upload-limits';
 
-/**
- * Processes a PDF file by parsing it into Document objects.
- * @param file - The PDF file to process.
- * @returns An array of Document objects extracted from the PDF.
- */
-export async function processPDF(file: File): Promise<Document[]> {
-  const buffer = await bufferFile(file);
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pdf-'));
-  const tempFilePath = path.join(tempDir, file.name);
-
-  try {
-    await fs.writeFile(tempFilePath, buffer);
-    const loader = new PDFLoader(tempFilePath);
-    const docs = await loader.load();
-
-    // Add filename to metadata for each document
-    docs.forEach((doc) => {
-      doc.metadata.filename = file.name;
-    });
-
-    return docs;
-  } finally {
-    // Clean up temporary files
-    await fs
-      .unlink(tempFilePath)
-      .catch((err) => console.error('Error deleting temp file:', err));
-    await fs
-      .rmdir(tempDir)
-      .catch((err) => console.error('Error deleting temp dir:', err));
-  }
-}
-
-/**
- * Converts a File object to a Buffer.
- * @param file - The uploaded file.
- * @returns A Buffer containing the file content.
- */
-async function bufferFile(file: File): Promise<Buffer> {
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    return buffer;
-  } catch (error) {
-    console.error('Error buffering file:', error);
-    throw new Error('Failed to read file content.');
-  }
+/** Parse untrusted PDFs in a disposable worker with a time and heap budget. */
+export async function processPDF(
+  file: File,
+  signal?: AbortSignal,
+): Promise<Document[]> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-')
+    throw new ApiError(422, 'File is not a valid PDF');
+  const pages = await new Promise<Array<{ num: number; text: string }>>(
+    (resolve, reject) => {
+      const worker = new Worker(
+        `
+      const { parentPort, workerData } = require('node:worker_threads');
+      const { PDFParse } = require(workerData.parserPath);
+      (async () => {
+        const parser = new PDFParse({ data: workerData.bytes, isEvalSupported: false });
+        try {
+          const info = await parser.getInfo();
+          if (info.total > workerData.maxPages) throw new Error('Page limit exceeded');
+          const result = await parser.getText();
+          if (result.text.length > workerData.maxChars) throw new Error('Text limit exceeded');
+          parentPort.postMessage({ pages: result.pages });
+        } finally { await parser.destroy(); }
+      })().catch(() => parentPort.postMessage({ error: true }));
+    `,
+        {
+          eval: true,
+          resourceLimits: { maxOldGenerationSizeMb: 256 },
+          workerData: {
+            parserPath: createRequire(
+              path.join(process.cwd(), 'package.json'),
+            ).resolve('pdf-parse'),
+            bytes,
+            maxPages: MAX_PAGES,
+            maxChars: MAX_TEXT_CHARS,
+          },
+        },
+      );
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        void worker.terminate();
+      };
+      const fail = () => {
+        cleanup();
+        reject(
+          new ApiError(
+            422,
+            'PDF could not be read. Use a text PDF of at most 100 pages.',
+          ),
+        );
+      };
+      const abort = () => {
+        cleanup();
+        reject(new ApiError(408, 'Upload cancelled'));
+      };
+      const timer = setTimeout(fail, 30000);
+      worker.once('message', (result) => {
+        if (result.error) fail();
+        else {
+          cleanup();
+          resolve(result.pages);
+        }
+      });
+      worker.once('error', fail);
+      worker.once('exit', (code) => {
+        if (code !== 0) fail();
+      });
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+    },
+  );
+  return pages
+    .filter((page) => page.text.trim())
+    .map(
+      (page) =>
+        new Document({
+          pageContent: page.text,
+          metadata: {
+            filename: file.name,
+            source: file.name,
+            loc: { pageNumber: page.num },
+          },
+        }),
+    );
 }

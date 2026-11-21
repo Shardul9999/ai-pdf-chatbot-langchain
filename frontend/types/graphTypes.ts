@@ -4,14 +4,14 @@ import { Document } from '@langchain/core/documents';
  * Represents the state of the retrieval graph / agent.
  */
 export type documentType =
-  PDFDocument[] | { [key: string]: any }[] | string[] | string | 'delete';
+  PDFDocument[] | { [key: string]: unknown }[] | string[] | string | 'delete';
 export interface AgentState {
   query?: string;
   route?: string;
   messages: Array<{
     content: string;
-    additional_kwargs: Record<string, any>;
-    response_metadata: Record<string, any>;
+    additional_kwargs: Record<string, unknown>;
+    response_metadata: Record<string, unknown>;
     id: string;
     type: 'human' | 'assistant';
   }>;
@@ -44,7 +44,7 @@ export type PDFDocument = Document & {
         IsAcroFormPresent?: boolean;
       };
       version?: string;
-      metadata?: any;
+      metadata?: unknown;
       totalPages?: number;
     };
     uuid?: string;
@@ -63,8 +63,7 @@ export interface BaseConfiguration {
    * Additional keyword arguments to pass to the search function of the retriever for filtering.
    * @default {}
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  filterKwargs?: Record<string, any>;
+  filterKwargs?: Record<string, unknown>;
 
   /**
    * The number of documents to retrieve.

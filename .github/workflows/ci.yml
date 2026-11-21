@@ -1,46 +1,31 @@
-# Run formatting on all PRs
-
 name: CI
-
 on:
   push:
-    branches: ['main']
+    branches: [main]
   pull_request:
-  workflow_dispatch: # Allows triggering the workflow manually in GitHub UI
-
-# If another push to the same PR or branch happens while this workflow is still running,
-# cancel the earlier run in favor of the next run.
+  workflow_dispatch:
+permissions:
+  contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  format:
-    name: Check formatting
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      # Non-secret syntactically valid fixture; no external auth requests in CI.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_bG9jYWwudGVzdCQ=
     steps:
       - uses: actions/checkout@v4
-      - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
-          node-version: 18.x
-          cache: 'npm'
-      - name: Install dependencies
-        run: npm ci
-      - name: Check formatting
-        run: npm run format:check
-
-  lint:
-    name: Check linting
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18.x
-          cache: 'npm'
-      - name: Install dependencies
-        run: npm ci
-      - name: Check linting
-        run: npm run lint
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run check
+      - run: npm audit --audit-level=high
+      - run: npm run build
+      - run: npm run test:standalone

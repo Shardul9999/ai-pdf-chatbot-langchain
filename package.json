@@ -10,15 +10,25 @@
     "frontend"
   ],
   "scripts": {
-    "build": "npm run turbo:command build",
+    "build": "npm run build --workspace=frontend",
     "turbo:command": "npx turbo",
-    "lint": "npm run turbo:command lint",
-    "lint:fix": "npm run turbo:command lint:fix",
+    "lint": "npm run lint --workspace=frontend",
+    "lint:fix": "npm run lint:fix --workspace=frontend",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "dev": "npm run dev --workspace=frontend",
+    "start": "npm run start --workspace=frontend",
+    "typecheck": "npm run typecheck --workspace=frontend",
+    "test": "npm run test --workspace=frontend",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "audit": "npm audit --omit=dev",
+    "test:standalone": "node scripts/smoke-standalone.mjs"
   },
   "devDependencies": {
     "prettier": "3.9.6",
-    "turbo": "latest"
+    "turbo": "2.9.18"
+  },
+  "engines": {
+    "node": ">=22.0.0 <27"
   }
 }

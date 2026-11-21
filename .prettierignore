@@ -8,3 +8,5 @@ coverage
 *.tsbuildinfo
 package-lock.json
 extrathings
+
+**/next-env.d.ts

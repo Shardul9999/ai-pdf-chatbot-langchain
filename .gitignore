@@ -62,3 +62,7 @@ extrathings/
 
 # regenerated dev instrumentation output
 frontend/performance_metrics.json
+
+# Secrets in any environment; retain the documented template.
+.env.*
+!.env.example

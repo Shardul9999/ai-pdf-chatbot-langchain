@@ -1,2 +1,12 @@
-node_modules
-dist
+**/node_modules
+**/.next
+.git
+**/.env*
+!**/.env.example
+**/coverage
+**/.turbo
+**/*.log
+.claude
+.codex
+.agents
+.aws

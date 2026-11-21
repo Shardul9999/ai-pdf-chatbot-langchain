@@ -1,48 +1,42 @@
-let userConfig = undefined;
-try {
-  userConfig = await import('./v0-user-next.config');
-} catch (e) {
-  // ignore error
-}
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
+  output: 'standalone',
+  poweredByHeader: false,
+  serverExternalPackages: ['pdf-parse'],
+  outputFileTracingIncludes: {
+    '/api/ingest': [
+      './node_modules/pdf-parse/**/*',
+      '../node_modules/pdf-parse/**/*',
+      './node_modules/pdfjs-dist/**/*',
+      '../node_modules/pdfjs-dist/**/*',
+      './node_modules/@napi-rs/canvas*/**/*',
+      '../node_modules/@napi-rs/canvas*/**/*',
+    ],
   },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  images: {
-    unoptimized: true,
-  },
-  experimental: {
-    webpackBuildWorker: true,
-    parallelServerBuildTraces: true,
-    parallelServerCompiles: true,
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
+          },
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000' },
+          {
+            key: 'Content-Security-Policy',
+            value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+          },
+        ],
+      },
+      {
+        source: '/api/:path*',
+        headers: [{ key: 'Cache-Control', value: 'private, no-store' }],
+      },
+    ];
   },
 };
-
-mergeConfig(nextConfig, userConfig);
-
-function mergeConfig(nextConfig, userConfig) {
-  if (!userConfig) {
-    return;
-  }
-
-  for (const key in userConfig) {
-    if (
-      typeof nextConfig[key] === 'object' &&
-      !Array.isArray(nextConfig[key])
-    ) {
-      nextConfig[key] = {
-        ...nextConfig[key],
-        ...userConfig[key],
-      };
-    } else {
-      nextConfig[key] = userConfig[key];
-    }
-  }
-}
-
 export default nextConfig;

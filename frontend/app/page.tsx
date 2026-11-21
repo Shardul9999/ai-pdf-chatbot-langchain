@@ -2,12 +2,13 @@
 
 import type React from 'react';
 import { useRef, useState, useEffect } from 'react';
-import { useUser } from '@clerk/nextjs';
+import { useUser, UserButton } from '@clerk/nextjs';
+import { readChatEvents } from '@/lib/sse';
+import { uploadError } from '@/lib/upload-limits';
 import { useToast } from '@/hooks/use-toast';
 import { PDFDocument, RetrieveDocumentsNodeUpdates } from '@/types/graphTypes';
 
-const SESSION_ID_KEY = 'chatSessionId';
-const THREAD_ID_KEY = 'chatThreadId';
+const sessionKey = (userId: string) => `readr:session:${userId}`;
 
 const SUGGESTIONS = [
   { icon: '📖', text: 'What is this about?' },
@@ -73,7 +74,11 @@ type Msg = {
 
 export default function Home() {
   const { toast } = useToast();
-  const { user } = useUser();
+  const { user, isLoaded } = useUser();
+  const userId = user?.id;
+  const activeThreadRef = useRef<string | null>(null);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const firstName = user?.firstName;
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
@@ -116,7 +121,6 @@ export default function Home() {
   const a15 = `rgba(${rw},0.15)`;
   const a20 = `rgba(${rw},0.20)`;
   const a25 = `rgba(${rw},0.25)`;
-  const a30 = `rgba(${rw},0.30)`;
   const outerBg = isDark ? '#000000' : '#edf6fc';
   const headerBg = isDark ? 'rgba(0,0,0,0.96)' : 'rgba(247,252,255,0.96)';
   const borderColor = `rgba(${rw},0.16)`;
@@ -160,7 +164,9 @@ export default function Home() {
   useEffect(() => {
     const c = canvasRef.current;
     if (!c) return;
-    const ctx = c.getContext('2d')!;
+    const ctx = c.getContext('2d');
+    if (!ctx || window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+      return;
     const [pr, pg, pb] = isDark ? [255, 214, 0] : [13, 148, 136];
     const draw = () => {
       ctx.clearRect(0, 0, c.width, c.height);
@@ -196,47 +202,102 @@ export default function Home() {
     };
   }, [isDark, isHistoryLoading]);
 
-  // ── Session init ──────────────────────────────────────────────────────────
+  // Restore only the signed-in user's session; abort work on account changes.
   useEffect(() => {
+    if (!isLoaded) return;
+    const controller = new AbortController();
+    abortControllerRef.current?.abort();
+    activeThreadRef.current = null;
+    setMessages([]);
+    setDocs([]);
+    setSessionId(null);
+    setThreadId(null);
+    setIsLoading(false);
+    setHistoryCursor(null);
+    if (!userId) {
+      setIsHistoryLoading(false);
+      return;
+    }
     const init = async () => {
       setIsHistoryLoading(true);
-      const minDelay = new Promise((res) => setTimeout(res, 2500));
       try {
-        const sid = localStorage.getItem(SESSION_ID_KEY);
-        const tid = localStorage.getItem(THREAD_ID_KEY);
-        if (sid && tid) {
-          setSessionId(sid);
-          setThreadId(tid);
-          const res = await fetch(`/api/history?sessionId=${sid}`);
-          if (res.ok) {
-            const { messages: rows } = await res.json();
-            if (rows?.length > 0) {
-              setMessages(
-                rows.map(
-                  (r: {
-                    role: 'user' | 'assistant';
-                    content: string;
-                    sources?: any[] | null;
-                  }) => ({
-                    role: r.role,
-                    content: r.content,
-                    sources: r.sources ?? undefined,
-                  }),
-                ),
-              );
-            }
-          }
-        } else {
-          createNewSession();
+        let id: string | null = null;
+        try {
+          id = localStorage.getItem(sessionKey(userId));
+          // Preserve the prior release's conversation pointer. The server still
+          // checks ownership, so another account's messages cannot be loaded.
+          if (!id) id = localStorage.getItem('chatSessionId');
+        } catch {
+          /* Private browsing may disable storage. */
         }
-      } catch {
-        createNewSession();
+        if (!id || !/^[\w-]{1,128}$/.test(id)) id = crypto.randomUUID();
+        try {
+          localStorage.setItem(sessionKey(userId), id);
+        } catch {
+          /* Session still works in memory. */
+        }
+        activeThreadRef.current = id;
+        setSessionId(id);
+        setThreadId(id);
+        const res = await fetch(
+          `/api/history?sessionId=${encodeURIComponent(id)}`,
+          { signal: controller.signal },
+        );
+        if (!res.ok)
+          throw new Error(
+            'Could not load saved messages. Please refresh to retry.',
+          );
+        const result = await res.json();
+        if (!controller.signal.aborted) {
+          setMessages(result.messages ?? []);
+          setHistoryCursor(result.nextCursor);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted)
+          toast({
+            title: 'History unavailable',
+            description:
+              error instanceof Error
+                ? error.message
+                : 'Please refresh to retry.',
+            variant: 'destructive',
+          });
+      } finally {
+        if (!controller.signal.aborted) setIsHistoryLoading(false);
       }
-      await minDelay;
-      setIsHistoryLoading(false);
     };
-    init();
-  }, []);
+    void init();
+    return () => {
+      controller.abort();
+      abortControllerRef.current?.abort();
+      activeThreadRef.current = null;
+    };
+  }, [isLoaded, userId, toast]);
+
+  const loadOlderMessages = async () => {
+    if (!historyCursor || !sessionId || loadingOlder) return;
+    const id = sessionId;
+    setLoadingOlder(true);
+    try {
+      const res = await fetch(
+        `/api/history?sessionId=${encodeURIComponent(id)}&before=${encodeURIComponent(historyCursor)}`,
+      );
+      if (!res.ok) throw new Error('Could not load earlier messages.');
+      const result = await res.json();
+      if (activeThreadRef.current === id) {
+        setMessages((current) => [...result.messages, ...current]);
+        setHistoryCursor(result.nextCursor);
+      }
+    } catch {
+      toast({
+        title: 'History unavailable',
+        description: 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
 
   // ── Scroll to bottom — directly on the container, never touches the window ─
   useEffect(() => {
@@ -262,8 +323,15 @@ export default function Home() {
   // ── Session helpers ───────────────────────────────────────────────────────
   const createNewSession = () => {
     const id = crypto.randomUUID();
-    localStorage.setItem(SESSION_ID_KEY, id);
-    localStorage.setItem(THREAD_ID_KEY, id);
+    if (userId) {
+      try {
+        localStorage.setItem(sessionKey(userId), id);
+      } catch {
+        /* Storage is optional. */
+      }
+    }
+    activeThreadRef.current = id;
+    setHistoryCursor(null);
     setSessionId(id);
     setThreadId(id);
     setMessages([]);
@@ -274,16 +342,23 @@ export default function Home() {
   const refreshDocuments = async (tid: string) => {
     try {
       const res = await fetch(`/api/documents?threadId=${tid}`);
-      if (!res.ok) return;
+      if (!res.ok) throw new Error('Documents unavailable');
       const { documents } = await res.json();
-      setDocs(Array.isArray(documents) ? documents : []);
+      if (activeThreadRef.current === tid)
+        setDocs(Array.isArray(documents) ? documents : []);
     } catch {
-      // Non-fatal: document list just won't update this round.
+      if (activeThreadRef.current === tid)
+        toast({
+          title: 'Documents unavailable',
+          description: 'Please refresh to retry.',
+          variant: 'destructive',
+        });
     }
   };
 
   const handleDeleteDocument = async (filename: string) => {
-    if (!threadId) return;
+    if (!threadId || isLoading || isUploading) return;
+    const deletingThread = threadId;
     try {
       const res = await fetch('/api/documents', {
         method: 'DELETE',
@@ -294,6 +369,7 @@ export default function Home() {
         const d = await res.json();
         throw new Error(d.error || 'Delete failed');
       }
+      if (activeThreadRef.current !== deletingThread) return;
       setDocs((prev) => prev.filter((d) => d.filename !== filename));
       toast({ title: 'Deleted', description: `${filename} removed` });
     } catch (err) {
@@ -334,8 +410,10 @@ export default function Home() {
   };
 
   const handleNewChat = () => {
-    localStorage.removeItem(SESSION_ID_KEY);
-    localStorage.removeItem(THREAD_ID_KEY);
+    if (isUploading) return;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setIsLoading(false);
     setInput('');
     createNewSession();
     toast({
@@ -346,7 +424,8 @@ export default function Home() {
 
   // ── Send message (SSE streaming) ──────────────────────────────────────────
   const sendMessage = async (text: string) => {
-    if (!text.trim() || !threadId || !sessionId || isLoading) return;
+    if (!text.trim() || !threadId || !sessionId || isLoading || isUploading)
+      return;
     if (abortControllerRef.current) abortControllerRef.current.abort();
 
     setMessages((prev) => [
@@ -369,65 +448,68 @@ export default function Home() {
         body: JSON.stringify({ message: text, threadId }),
         signal: ctrl.signal,
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const result = await res.json().catch(() => ({}));
+        throw new Error(result.error || 'Unable to send message');
+      }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('No reader');
-      const decoder = new TextDecoder();
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const lines = decoder.decode(value).split('\n').filter(Boolean);
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          let ev: any;
-          try {
-            ev = JSON.parse(line.slice(6));
-          } catch {
-            continue;
+      if (!res.body) throw new Error('Empty response');
+      let completed = false;
+      for await (const ev of readChatEvents(res.body)) {
+        if (ctrl.signal.aborted || activeThreadRef.current !== threadId) return;
+        const { event, data } = ev;
+        if (event === 'error')
+          throw new Error(
+            (data as { message?: string })?.message || 'Response failed',
+          );
+        if (event === 'messages') completed = true;
+        if (event === 'messages/partial' || event === 'messages') {
+          const msgs = Array.isArray(data) ? data : [data];
+          const ai = msgs
+            .filter(
+              (m): m is { type: 'ai'; content: string } =>
+                !!m &&
+                typeof m === 'object' &&
+                'type' in m &&
+                m.type === 'ai' &&
+                'content' in m &&
+                typeof m.content === 'string',
+            )
+            .pop();
+          if (ai) {
+            const content = ai.content;
+            if (content) {
+              setMessages((prev) => {
+                const arr = [...prev];
+                if (arr.at(-1)?.role === 'assistant')
+                  arr[arr.length - 1] = {
+                    ...arr[arr.length - 1],
+                    content,
+                    sources: lastDocsRef.current,
+                  };
+                return arr;
+              });
+            }
           }
-          const { event, data } = ev;
-
-          if (event === 'messages/partial' || event === 'messages') {
-            const msgs = Array.isArray(data) ? data : [data];
-            const ai = msgs.filter((m: any) => m?.type === 'ai').pop();
-            if (ai) {
-              const content =
-                typeof ai.content === 'string'
-                  ? ai.content
-                  : Array.isArray(ai.content)
-                    ? ai.content
-                        .filter((c: any) => c?.type === 'text')
-                        .map((c: any) => c.text)
-                        .join('')
-                    : '';
-              if (content) {
-                setMessages((prev) => {
-                  const arr = [...prev];
-                  if (arr.at(-1)?.role === 'assistant')
-                    arr[arr.length - 1] = {
-                      ...arr[arr.length - 1],
-                      content,
-                      sources: lastDocsRef.current,
-                    };
-                  return arr;
-                });
-              }
-            }
-          } else if (event === 'updates' && data) {
-            if (
-              'retrieveDocuments' in data &&
-              Array.isArray(data.retrieveDocuments?.documents)
-            ) {
-              lastDocsRef.current = (data as RetrieveDocumentsNodeUpdates)
-                .retrieveDocuments.documents as PDFDocument[];
-            }
+        } else if (event === 'updates' && data && typeof data === 'object') {
+          if (
+            'retrieveDocuments' in data &&
+            Array.isArray(
+              (data as RetrieveDocumentsNodeUpdates).retrieveDocuments
+                ?.documents,
+            )
+          ) {
+            lastDocsRef.current = (data as RetrieveDocumentsNodeUpdates)
+              .retrieveDocuments.documents as PDFDocument[];
           }
         }
       }
+      if (!completed)
+        throw new Error(
+          'The connection ended before the response was saved. Please try again.',
+        );
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return;
+      if (ctrl.signal.aborted || activeThreadRef.current !== threadId) return;
       toast({
         title: 'Error',
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -443,103 +525,56 @@ export default function Home() {
         return arr;
       });
     } finally {
-      setIsLoading(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === ctrl) {
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      }
     }
   };
 
-  // ── File upload ───────────────────────────────────────────────────────────
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files || []);
-    if (!selected.length) return;
-    if (selected.some((f) => f.type !== 'application/pdf')) {
-      toast({
-        title: 'PDFs only',
-        description: 'Please upload PDF files only',
-        variant: 'destructive',
-      });
-      return;
-    }
-    if (!threadId) {
+  // Shared validation for picker and drag-and-drop uploads.
+  const uploadFiles = async (selected: File[]) => {
+    if (isUploading || isLoading || !threadId) return;
+    const validation = uploadError(selected);
+    if (validation) {
       toast({
         title: 'Upload failed',
-        description: 'No active chat session yet',
+        description: validation,
         variant: 'destructive',
       });
       return;
     }
+    const uploadingThread = threadId;
     setIsUploading(true);
     try {
       const fd = new FormData();
-      selected.forEach((f) => fd.append('files', f));
-      fd.append('threadId', threadId);
+      selected.forEach((file) => fd.append('files', file));
+      fd.append('threadId', uploadingThread);
       const res = await fetch('/api/ingest', { method: 'POST', body: fd });
-      if (!res.ok) {
-        const d = await res.json();
-        throw new Error(d.error || 'Upload failed');
-      }
-      await refreshDocuments(threadId);
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Upload failed');
+      if (activeThreadRef.current !== uploadingThread) return;
+      await refreshDocuments(uploadingThread);
       toast({
         title: 'Uploaded',
-        description: `${selected.length} file${selected.length > 1 ? 's' : ''} ready`,
+        description: `${result.filesIngested} file(s) ready`,
       });
-    } catch (err) {
-      toast({
-        title: 'Upload failed',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
-      });
+    } catch (error) {
+      if (activeThreadRef.current === uploadingThread)
+        toast({
+          title: 'Upload failed',
+          description:
+            error instanceof Error ? error.message : 'Please try again.',
+          variant: 'destructive',
+        });
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
-
-  const handleDropFiles = async (fileList: FileList) => {
-    const selected = Array.from(fileList).filter(
-      (f) => f.type === 'application/pdf',
-    );
-    if (!selected.length) {
-      toast({
-        title: 'PDFs only',
-        description: 'Please drop PDF files only',
-        variant: 'destructive',
-      });
-      return;
-    }
-    if (!threadId) {
-      toast({
-        title: 'Upload failed',
-        description: 'No active chat session yet',
-        variant: 'destructive',
-      });
-      return;
-    }
-    setIsUploading(true);
-    try {
-      const fd = new FormData();
-      selected.forEach((f) => fd.append('files', f));
-      fd.append('threadId', threadId);
-      const res = await fetch('/api/ingest', { method: 'POST', body: fd });
-      if (!res.ok) {
-        const d = await res.json();
-        throw new Error(d.error || 'Upload failed');
-      }
-      await refreshDocuments(threadId);
-      toast({
-        title: 'Uploaded',
-        description: `${selected.length} file${selected.length > 1 ? 's' : ''} ready`,
-      });
-    } catch (err) {
-      toast({
-        title: 'Upload failed',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsUploading(false);
-    }
-  };
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) =>
+    uploadFiles(Array.from(e.target.files ?? []));
+  const handleDropFiles = (files: FileList) => uploadFiles(Array.from(files));
 
   const isEmpty = messages.length === 0 && !isLoading;
 
@@ -858,6 +893,7 @@ export default function Home() {
                 <button
                   onClick={() => handleDeleteDocument(d.filename)}
                   title="Delete document"
+                  disabled={isLoading || isUploading}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -874,8 +910,10 @@ export default function Home() {
             ))}
           </div>
         )}
+        <UserButton />
         <button
           onClick={handleNewChat}
+          disabled={isUploading || isLoading}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -978,6 +1016,8 @@ export default function Home() {
            ref on THIS div so scrollTo() targets the container, never the window. ── */}
       <div
         ref={msgsContainerRef}
+        role="log"
+        aria-label="Conversation"
         style={{
           position: 'relative',
           zIndex: 2,
@@ -1003,6 +1043,16 @@ export default function Home() {
             flex: 1,
           }}
         >
+          {historyCursor && (
+            <button
+              type="button"
+              onClick={loadOlderMessages}
+              disabled={loadingOlder}
+              style={{ color: accent, padding: 12 }}
+            >
+              {loadingOlder ? 'Loading…' : 'Load earlier messages'}
+            </button>
+          )}
           {isEmpty && (
             <div
               style={{
@@ -1386,7 +1436,7 @@ export default function Home() {
                 type="button"
                 className="plus-upload-btn"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
+                disabled={isUploading || isLoading}
                 title={isUploading ? 'Uploading…' : 'Upload PDF'}
                 style={{
                   background: accent,
@@ -1418,6 +1468,8 @@ export default function Home() {
                 </svg>
               </button>
               <textarea
+                aria-label="Ask about your documents"
+                maxLength={8000}
                 ref={textareaRef}
                 className="chat-input-field"
                 value={input}
@@ -1437,7 +1489,7 @@ export default function Home() {
                 onBlur={() => setInputFocused(false)}
                 placeholder="Ask Readr anything…"
                 rows={1}
-                disabled={isLoading || !threadId}
+                disabled={isLoading || isUploading || !threadId}
                 style={{
                   flex: 1,
                   background: 'none',
@@ -1457,7 +1509,9 @@ export default function Home() {
               <button
                 type="submit"
                 className="send-btn"
-                disabled={!input.trim() || isLoading || !threadId}
+                disabled={
+                  !input.trim() || isLoading || isUploading || !threadId
+                }
                 style={{
                   background: accent,
                   color: userTextColor,
@@ -1496,7 +1550,7 @@ export default function Home() {
               letterSpacing: '0.15px',
             }}
           >
-            Powered by LangChain · Readr for researchers &amp; students
+            PDFs: 3 MB each · under 4 MB combined · 100 pages each
           </div>
         </div>
       </div>

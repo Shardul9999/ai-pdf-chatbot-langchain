@@ -18,7 +18,7 @@ jobs:
       # Non-secret syntactically valid fixture; no external auth requests in CI.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_bG9jYWwudGVzdCQ=
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
